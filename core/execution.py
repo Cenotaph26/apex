@@ -1,9 +1,14 @@
 """
-ExecutionEngine — Binance Spot Testnet REST client.
+ExecutionEngine — Binance Futures Demo Trading REST client.
 
-Timestamp sync: fetches server time once at startup and caches
-the offset. Refreshes every 5 minutes. This handles Railway
-container clock drift which causes 401 errors.
+Futures Demo: https://testnet.binancefuture.com
+- GET  /fapi/v2/balance       → wallet balance
+- POST /fapi/v1/order         → place order
+- DELETE /fapi/v1/order       → cancel order
+- GET  /fapi/v1/time          → server time
+
+API key from: binance.com → Testnet → Futures Testnet
+Or from demo trading: your existing demo key works with testnet.binancefuture.com
 """
 from __future__ import annotations
 import hashlib
@@ -18,8 +23,7 @@ from core.config import settings
 
 log = logging.getLogger("apex.execution")
 
-# How long to cache the server time offset (ms)
-_OFFSET_TTL = 300  # seconds
+_OFFSET_TTL = 300  # seconds between time syncs
 
 
 def _sign(query_string: str, secret: str) -> str:
@@ -38,47 +42,48 @@ class ExecutionEngine:
             timeout=15.0,
         )
         self._dry_run = not bool(settings.api_key)
-        self._offset_ms: int = 0          # server_time - local_time
+        self._offset_ms: int = 0
         self._offset_fetched_at: float = 0.0
 
+        mode = "Futures Demo" if settings.is_futures_demo else "Spot Testnet"
         if self._dry_run:
-            log.warning("No API_KEY set — running in DRY-RUN mode (no real orders)")
+            log.warning("No API key — DRY-RUN mode")
         else:
-            log.info("ExecutionEngine ready — testnet=%s key=...%s",
-                     settings.testnet, settings.api_key[-6:])
+            log.info("ExecutionEngine ready [%s] base=%s key=...%s",
+                     mode, settings.rest_base, settings.api_key[-6:])
 
-    # ── Server time sync ──────────────────────────────────────
+    # ── Time sync ─────────────────────────────────────────────
 
     async def _sync_time(self):
-        """Fetch Binance server time and cache the offset."""
+        time_path = "/fapi/v1/time" if settings.is_futures_demo else "/api/v3/time"
         try:
-            r = await self._client.get("/api/v3/time", timeout=5.0)
+            r = await self._client.get(time_path, timeout=5.0)
             server_ms = r.json()["serverTime"]
             local_ms  = int(time.time() * 1000)
             self._offset_ms = server_ms - local_ms
             self._offset_fetched_at = time.time()
             log.info("Clock offset synced: %+d ms", self._offset_ms)
         except Exception as e:
-            log.warning("Time sync failed (using offset=0): %s", e)
+            log.warning("Time sync failed (offset=0): %s", e)
             self._offset_ms = 0
+            self._offset_fetched_at = time.time()
 
     async def _get_offset(self) -> int:
-        """Return cached offset, refresh if stale."""
         if time.time() - self._offset_fetched_at > _OFFSET_TTL:
             await self._sync_time()
         return self._offset_ms
 
-    # ── Signing helpers ───────────────────────────────────────
+    # ── Signed request helpers ────────────────────────────────
 
     async def _signed_get(self, path: str, params: dict | None = None) -> dict:
         p = dict(params or {})
         p["timestamp"]  = int(time.time() * 1000) + await self._get_offset()
-        p["recvWindow"] = 60000          # generous window for Railway
+        p["recvWindow"] = 60000
         qs = urllib.parse.urlencode(p)
         p["signature"]  = _sign(qs, settings.api_secret)
         r = await self._client.get(path, params=p)
         if not r.is_success:
-            log.error("GET %s → %d: %s", path, r.status_code, r.text[:300])
+            log.error("GET %s → %d: %s", path, r.status_code, r.text[:400])
         r.raise_for_status()
         return r.json()
 
@@ -94,68 +99,93 @@ class ExecutionEngine:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         if not r.is_success:
-            log.error("POST %s → %d: %s", path, r.status_code, r.text[:300])
+            log.error("POST %s → %d: %s", path, r.status_code, r.text[:400])
         r.raise_for_status()
         return r.json()
 
-    # ── Public API ────────────────────────────────────────────
+    # ── Balance ───────────────────────────────────────────────
 
     async def get_balance(self) -> float:
-        """Return USDT free balance from testnet account."""
+        """Return USDT balance from Futures Demo account."""
         if self._dry_run:
             return 1000.0
-
         try:
-            data = await self._signed_get("/api/v3/account")
-
-            # Log all non-zero balances so we can debug
-            non_zero = [
-                f"{a['asset']}={float(a['free']):.4f}"
-                for a in data.get("balances", [])
-                if float(a.get("free", 0)) > 0
-            ]
-            log.info("Testnet balances: %s",
-                     ", ".join(non_zero) if non_zero else "(none)")
-
-            # Prefer USDT, fall back to BUSD
-            for target in ("USDT", "BUSD"):
+            if settings.is_futures_demo:
+                # Futures: GET /fapi/v2/balance → list of assets
+                data = await self._signed_get("/fapi/v2/balance")
+                non_zero = [
+                    f"{a['asset']}={float(a.get('availableBalance', a.get('balance', 0))):.2f}"
+                    for a in data
+                    if float(a.get('availableBalance', a.get('balance', 0))) > 0
+                ]
+                log.info("Futures Demo balances: %s",
+                         ", ".join(non_zero) if non_zero else "(empty)")
+                for asset in data:
+                    if asset.get("asset") == "USDT":
+                        bal = float(asset.get("availableBalance",
+                                              asset.get("balance", 0)))
+                        log.info("Futures Demo USDT balance: %.2f", bal)
+                        return bal
+                log.warning("USDT not found in futures balance")
+                return 1000.0
+            else:
+                # Spot testnet: GET /api/v3/account
+                data = await self._signed_get("/api/v3/account")
+                non_zero = [
+                    f"{a['asset']}={float(a['free']):.4f}"
+                    for a in data.get("balances", [])
+                    if float(a.get("free", 0)) > 0
+                ]
+                log.info("Spot balances: %s",
+                         ", ".join(non_zero) if non_zero else "(empty)")
                 for asset in data.get("balances", []):
-                    if asset["asset"] == target:
+                    if asset["asset"] in ("USDT", "BUSD"):
                         bal = float(asset["free"])
                         if bal > 0:
-                            log.info("Balance: %.2f %s", bal, target)
                             return bal
-
-            log.warning("No USDT/BUSD balance on testnet — using 1000.0 fallback")
-            return 1000.0
+                return 1000.0
 
         except httpx.HTTPStatusError as e:
-            log.error("Balance fetch HTTP error %d: %s",
-                      e.response.status_code, e.response.text[:200])
+            log.error("Balance HTTP %d: %s",
+                      e.response.status_code, e.response.text[:300])
             return 1000.0
         except Exception as e:
             log.error("Balance fetch error: %s", e)
             return 1000.0
 
+    # ── Orders ────────────────────────────────────────────────
+
     async def place_market_order(
         self,
         symbol: str,
-        side: str,
+        side: str,      # 'BUY' | 'SELL'
         qty: float,
     ) -> dict:
         if self._dry_run:
             log.info("[DRY-RUN] MARKET %s %s qty=%.4f", side, symbol, qty)
             return {"orderId": f"dry_{int(time.time())}", "status": "FILLED"}
 
-        params = {
-            "symbol":   symbol,
-            "side":     side,
-            "type":     "MARKET",
-            "quantity": f"{qty:.4f}",
-        }
+        if settings.is_futures_demo:
+            # Futures order
+            params = {
+                "symbol":   symbol,
+                "side":     side,
+                "type":     "MARKET",
+                "quantity": f"{qty:.3f}",
+            }
+            path = "/fapi/v1/order"
+        else:
+            params = {
+                "symbol":   symbol,
+                "side":     side,
+                "type":     "MARKET",
+                "quantity": f"{qty:.4f}",
+            }
+            path = "/api/v3/order"
+
         try:
-            result = await self._signed_post("/api/v3/order", params)
-            log.info("ORDER PLACED: %s %s qty=%.4f id=%s status=%s",
+            result = await self._signed_post(path, params)
+            log.info("ORDER: %s %s qty=%.4f → id=%s status=%s",
                      side, symbol, qty,
                      result.get("orderId"), result.get("status"))
             return result
@@ -175,17 +205,30 @@ class ExecutionEngine:
                      side, symbol, qty, price)
             return {"orderId": f"dry_{int(time.time())}", "status": "NEW"}
 
-        params = {
-            "symbol":      symbol,
-            "side":        side,
-            "type":        "LIMIT",
-            "timeInForce": "GTC",
-            "quantity":    f"{qty:.4f}",
-            "price":       f"{price:.4f}",
-        }
+        if settings.is_futures_demo:
+            params = {
+                "symbol":      symbol,
+                "side":        side,
+                "type":        "LIMIT",
+                "timeInForce": "GTC",
+                "quantity":    f"{qty:.3f}",
+                "price":       f"{price:.2f}",
+            }
+            path = "/fapi/v1/order"
+        else:
+            params = {
+                "symbol":      symbol,
+                "side":        side,
+                "type":        "LIMIT",
+                "timeInForce": "GTC",
+                "quantity":    f"{qty:.4f}",
+                "price":       f"{price:.4f}",
+            }
+            path = "/api/v3/order"
+
         try:
-            result = await self._signed_post("/api/v3/order", params)
-            log.info("LIMIT ORDER: %s %s @ %.4f id=%s",
+            result = await self._signed_post(path, params)
+            log.info("LIMIT: %s %s @ %.4f → id=%s",
                      side, symbol, price, result.get("orderId"))
             return result
         except Exception as e:
@@ -195,17 +238,17 @@ class ExecutionEngine:
     async def cancel_order(self, symbol: str, order_id: str):
         if self._dry_run:
             return
-        params = {
-            "symbol":    symbol,
-            "orderId":   order_id,
+        path = "/fapi/v1/order" if settings.is_futures_demo else "/api/v3/order"
+        p = {
+            "symbol":  symbol,
+            "orderId": order_id,
         }
         try:
-            p = dict(params)
             p["timestamp"]  = int(time.time() * 1000) + await self._get_offset()
             p["recvWindow"] = 60000
             qs = urllib.parse.urlencode(p)
             p["signature"]  = _sign(qs, settings.api_secret)
-            r = await self._client.delete("/api/v3/order", params=p)
+            r = await self._client.delete(path, params=p)
             r.raise_for_status()
         except Exception as e:
             log.warning("Cancel order failed: %s", e)
