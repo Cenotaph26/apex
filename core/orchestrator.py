@@ -92,6 +92,7 @@ class Orchestrator:
     async def run(self):
         self._running = True
 
+        await self.exec._sync_time()   # sync clock before first signed request
         balance = await self.exec.get_balance()
         self.risk.state.current_balance = balance
         self.risk.state.peak_balance = balance
