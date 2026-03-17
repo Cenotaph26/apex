@@ -13,8 +13,16 @@ class Settings:
     # ── Exchange ──────────────────────────────────────────────
     exchange: str = os.getenv("EXCHANGE", "binance")
     testnet: bool = os.getenv("TESTNET", "true").lower() == "true"
-    api_key: str = os.getenv("API_KEY", "")
-    api_secret: str = os.getenv("API_SECRET", "")
+    api_key: str = (
+        os.getenv("API_KEY") or
+        os.getenv("BINANCE_API_KEY") or
+        ""
+    )
+    api_secret: str = (
+        os.getenv("API_SECRET") or
+        os.getenv("BINANCE_API_SECRET") or
+        ""
+    )
 
     # ── Watchlist ─────────────────────────────────────────────
     # Comma-separated, e.g. "BTCUSDT,ETHUSDT,SOLUSDT"
