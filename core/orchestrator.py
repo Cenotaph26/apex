@@ -102,8 +102,9 @@ class Orchestrator:
         eval_task    = asyncio.create_task(self._eval_loop())
         monitor_task = asyncio.create_task(self._monitor_loop())
         equity_task  = asyncio.create_task(self._equity_loop())
+        balance_task = asyncio.create_task(self._balance_loop())
 
-        await asyncio.gather(feed_task, eval_task, monitor_task, equity_task)
+        await asyncio.gather(feed_task, eval_task, monitor_task, equity_task, balance_task)
 
     def stop(self):
         self._running = False
@@ -113,6 +114,25 @@ class Orchestrator:
 
     def _on_candle_close(self, symbol: str):
         self._pending_eval.add(symbol)
+
+    # ── Balance refresh (every 30s from testnet REST) ────────
+
+    async def _balance_loop(self):
+        """Periodically syncs real balance from testnet REST API."""
+        await asyncio.sleep(30)  # let startup settle first
+        while self._running:
+            try:
+                bal = await self.exec.get_balance()
+                if bal > 0:
+                    old_bal = self.risk.state.current_balance
+                    self.risk.state.current_balance = bal
+                    if self.risk.state.peak_balance == 0 or bal > self.risk.state.peak_balance:
+                        self.risk.state.peak_balance = bal
+                    if abs(bal - old_bal) > 0.01:
+                        self._log("ok", f"Balance synced: {bal:.2f} USDT")
+            except Exception as e:
+                self._log("warn", f"Balance sync failed: {e}")
+            await asyncio.sleep(30)
 
     # ── Equity snapshot (every 60s) ───────────────────────────
 

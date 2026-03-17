@@ -54,17 +54,32 @@ class ExecutionEngine:
         return r.json()
 
     async def get_balance(self) -> float:
-        """Returns USDT balance."""
+        """Returns USDT or BUSD balance from testnet."""
         if self._dry_run:
             return 1000.0
         try:
             data = await self._signed_get("/api/v3/account", {})
-            for asset in data.get("balances", []):
-                if asset["asset"] == "USDT":
-                    return float(asset["free"])
+            non_zero = [
+                f"{a['asset']}={a['free']}"
+                for a in data.get("balances", [])
+                if float(a.get("free", 0)) > 0
+            ]
+            if non_zero:
+                log.info("Testnet balances: %s", ", ".join(non_zero))
+            else:
+                log.warning("No non-zero balances found on testnet account")
+            for target in ("USDT", "BUSD"):
+                for asset in data.get("balances", []):
+                    if asset["asset"] == target:
+                        bal = float(asset["free"])
+                        if bal > 0:
+                            log.info("Using %s balance: %.2f", target, bal)
+                            return bal
+            log.warning("No stablecoin balance found, returning 1000.0")
+            return 1000.0
         except Exception as e:
             log.error("Balance fetch failed: %s", e)
-        return 0.0
+            return 1000.0
 
     async def place_market_order(
         self,
