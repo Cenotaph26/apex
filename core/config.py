@@ -38,7 +38,7 @@ class Settings:
     ])
 
     # ── Orchestrator ──────────────────────────────────────────
-    score_threshold: float  = float(os.getenv("SCORE_THRESHOLD", "75"))
+    score_threshold: float  = float(os.getenv("SCORE_THRESHOLD", "65"))
     loop_interval_sec: float = float(os.getenv("LOOP_INTERVAL_SEC", "60"))
     max_open_positions: int  = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
 

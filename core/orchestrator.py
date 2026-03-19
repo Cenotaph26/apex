@@ -94,8 +94,9 @@ class Orchestrator:
 
         await self.exec._sync_time()   # sync clock before first signed request
         balance = await self.exec.get_balance()
-        self.risk.state.current_balance = balance
-        self.risk.state.peak_balance = balance
+        # Reset session: peak = current balance so drawdown starts fresh each run
+        self.risk.state.current_balance  = balance
+        self.risk.state.peak_balance     = balance   # session peak starts here
         self.risk.state.starting_balance = balance
         self._log("ok", f"Starting balance: {balance:.2f} USDT")
 

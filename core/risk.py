@@ -44,9 +44,11 @@ class RiskState:
 
     @property
     def drawdown_pct(self) -> float:
+        """Session drawdown from peak — not from initial balance."""
         if self.peak_balance == 0:
             return 0.0
-        return (self.peak_balance - self.current_balance) / self.peak_balance * 100
+        dd = (self.peak_balance - self.current_balance) / self.peak_balance * 100
+        return max(0.0, dd)
 
     @property
     def daily_pnl(self) -> float:
