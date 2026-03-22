@@ -103,12 +103,15 @@ class ExecutionEngine:
     # ── Balance ───────────────────────────────────────────────
     async def get_balance(self) -> float:
         """
-        Returns walletBalance (total equity) — NOT availableBalance.
+        Returns the true account equity (walletBalance).
 
-        availableBalance drops when positions are open (margin is reserved),
-        which would falsely trigger the drawdown circuit breaker.
-        walletBalance = deposits + realized PnL (real account value).
-        Unrealized PnL is tracked separately by the risk manager.
+        Binance testnet quirk: /fapi/v2/balance returns walletBalance=0
+        and puts the real value in 'balance' (or sometimes only availableBalance).
+        We use a fallback chain to handle all cases:
+          1. walletBalance  (live futures — correct field)
+          2. balance        (testnet alternate field name)
+          3. availableBalance — ONLY when no positions are open
+             (when positions exist, available < wallet due to margin lock)
         """
         if self._dry_run:
             return 1000.0
@@ -117,13 +120,18 @@ class ExecutionEngine:
                 data = await self._get("/fapi/v2/balance")
                 for a in data:
                     if a.get("asset") == "USDT":
-                        wallet_bal = float(a.get("walletBalance", 0))
-                        avail_bal  = float(a.get("availableBalance", 0))
+                        wallet_bal = float(a.get("walletBalance") or 0)
+                        balance_f  = float(a.get("balance") or 0)
+                        avail_bal  = float(a.get("availableBalance") or 0)
                         log.info(
-                            "Futures USDT — wallet: %.2f  available: %.2f",
-                            wallet_bal, avail_bal,
+                            "Futures USDT — walletBalance: %.2f  balance: %.2f  "
+                            "availableBalance: %.2f",
+                            wallet_bal, balance_f, avail_bal,
                         )
-                        return wallet_bal
+                        # Priority: walletBalance > balance > availableBalance
+                        result = wallet_bal or balance_f or avail_bal
+                        if result > 0:
+                            return result
             else:
                 data = await self._get("/api/v3/account")
                 for a in data.get("balances", []):

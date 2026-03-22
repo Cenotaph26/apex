@@ -467,7 +467,7 @@ function renderOrch(best){
 }
 
 function applyState(d){
-  if(!d||!d.balance)return;
+  if(!d||d.balance===undefined)return;
   set('uptime',d.uptime||'—');
   var now=new Date();
   set('hdr-ts',now.toISOString().replace('T',' — ').slice(0,22)+' UTC');
@@ -576,7 +576,7 @@ function connectSSE(){
     retryDelay=2000;
   };
   sse.onmessage=function(e){
-    try{var d=JSON.parse(e.data);if(d&&d.balance)applyState(d);}catch(_){}
+    try{var d=JSON.parse(e.data);if(d&&d.balance!==undefined)applyState(d);}catch(_){}
   };
   sse.onerror=function(){
     sse.close();
