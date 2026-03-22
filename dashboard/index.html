@@ -19,7 +19,6 @@
 }
 html,body{height:100%;background:var(--bg);color:var(--w);font-family:var(--mono);font-size:12px}
 body{padding:12px;overflow-y:auto}
-
 .dash{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
 
 /* header */
@@ -27,12 +26,20 @@ body{padding:12px;overflow-y:auto}
   padding:9px 13px;background:var(--bg1);border:0.5px solid var(--b);border-radius:7px}
 .hdr-l{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .logo{font-size:14px;font-weight:500;letter-spacing:3px;color:var(--or)}
-.pulse{width:6px;height:6px;border-radius:50%;background:var(--or);animation:blink 1.4s infinite;flex-shrink:0}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--or);animation:blink 1.4s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
 .pill{font-size:10px;color:var(--g1);padding:2px 9px;background:var(--bg3);
   border:0.5px solid var(--b);border-radius:3px;white-space:nowrap}
 .pill b{color:var(--or3);font-weight:400;margin-left:3px}
+.hdr-r{display:flex;align-items:center;gap:8px}
 .hdr-ts{font-size:10px;color:var(--g2)}
+.ctrl-btn{font-size:10px;padding:3px 10px;border-radius:3px;border:0.5px solid var(--b2);
+  background:transparent;color:var(--g1);cursor:pointer;transition:all .15s}
+.ctrl-btn:hover{background:var(--bg3);color:var(--w)}
+.ctrl-btn.danger{border-color:#5c1a1a;color:var(--red)}
+.ctrl-btn.danger:hover{background:#1f0505}
+.ctrl-btn.success{border-color:#1a5c30;color:var(--green)}
+.ctrl-btn.success:hover{background:#052010}
 
 /* api bar */
 .apibar{grid-column:1/-1;display:flex;gap:6px;align-items:center;
@@ -48,9 +55,7 @@ body{padding:12px;overflow-y:auto}
 .mc{background:var(--bg1);border:0.5px solid var(--b);border-radius:7px;
   padding:11px 13px;position:relative;overflow:hidden}
 .mc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--b)}
-.mc.hot::before{background:var(--or)}
-.mc.up::before{background:var(--green)}
-.mc.dn::before{background:var(--red)}
+.mc.hot::before{background:var(--or)}.mc.up::before{background:var(--green)}.mc.dn::before{background:var(--red)}
 .mlbl{font-size:9px;letter-spacing:1.2px;color:var(--g1);margin-bottom:5px;text-transform:uppercase}
 .mval{font-size:21px;font-weight:500;color:var(--w);line-height:1}
 .mval.or{color:var(--or)}.mval.gr{color:var(--green)}.mval.rd{color:var(--red)}
@@ -67,18 +72,17 @@ body{padding:12px;overflow-y:auto}
 .bgr{background:#052010;color:var(--green);border:0.5px solid #1a5c30}
 .bgy{background:var(--bg3);color:var(--g1);border:0.5px solid var(--b)}
 .bred{background:#1f0505;color:var(--red);border:0.5px solid #5c1a1a}
+.byel{background:#2a1500;color:var(--yel);border:0.5px solid #854f0b}
 
 /* log */
-.logwrap{padding:9px 11px;max-height:195px;overflow:hidden;display:flex;flex-direction:column;gap:3px}
-.ll{display:flex;gap:7px;align-items:baseline;line-height:1.5}
-.lts{color:var(--g2);min-width:50px;flex-shrink:0;font-size:10px}
-.llvl{min-width:34px;flex-shrink:0;font-size:8px;padding:1px 3px;border-radius:2px;text-align:center;letter-spacing:.4px}
-.li{background:#0d2035;color:#5ba8d4}
-.lo{background:#052010;color:var(--green)}
-.lw{background:#2a1500;color:var(--yel)}
-.le{background:#1f0505;color:var(--red)}
+.logwrap{padding:9px 11px;max-height:210px;overflow:hidden;display:flex;flex-direction:column;gap:3px}
+.ll{display:flex;gap:7px;align-items:baseline;line-height:1.6}
+.lts{color:var(--g2);min-width:50px;font-size:10px}
+.llvl{min-width:34px;font-size:8px;padding:1px 3px;border-radius:2px;text-align:center}
+.li{background:#0d2035;color:#5ba8d4}.lo{background:#052010;color:var(--green)}
+.lw{background:#2a1500;color:var(--yel)}.le{background:#1f0505;color:var(--red)}
 .ls{background:var(--ordim);color:var(--or2)}
-.lmsg{color:#c8c4bc;flex:1;font-size:11px;word-break:break-all}
+.lmsg{color:#c8c4bc;font-size:11px;flex:1;word-break:break-word}
 .cur{display:inline-block;width:6px;height:11px;background:var(--or);
   vertical-align:middle;animation:cblink .9s step-end infinite;margin-left:2px}
 @keyframes cblink{50%{opacity:0}}
@@ -86,24 +90,24 @@ body{padding:12px;overflow-y:auto}
 /* signals */
 .slist{padding:9px 11px;display:flex;flex-direction:column;gap:6px}
 .srow{display:flex;align-items:center;gap:7px}
-.ssym{font-size:11px;color:var(--w);min-width:56px;font-weight:500}
-.sdir{font-size:8px;padding:1px 5px;border-radius:2px;letter-spacing:.4px;min-width:34px;text-align:center}
+.ssym{font-size:11px;color:var(--w);min-width:58px;font-weight:500}
+.sdir{font-size:8px;padding:1px 5px;border-radius:2px;min-width:34px;text-align:center}
 .dl{background:#052010;color:var(--green);border:0.5px solid #1a5c30}
 .ds{background:#1f0505;color:var(--red);border:0.5px solid #5c1a1a}
 .dn{background:var(--bg3);color:var(--g1);border:0.5px solid var(--b)}
 .sbw{flex:1;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden}
-.sb{height:100%;border-radius:2px;transition:width .5s ease}
+.sb{height:100%;border-radius:2px;transition:width .5s}
 .ssc{font-size:11px;min-width:26px;text-align:right}
 .shi{color:var(--or2)}.smi{color:var(--yel)}.slo{color:var(--g1)}
 
-/* position */
-.poslist{padding:9px 11px;display:flex;flex-direction:column;gap:7px}
+/* positions */
+.poslist{padding:9px 11px;display:flex;flex-direction:column;gap:8px}
 .pc{background:var(--bg3);border:0.5px solid var(--b2);border-radius:6px;padding:8px 10px}
 .ptop{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
 .psym{font-size:13px;font-weight:500;color:var(--or3)}
 .ppnl{font-size:13px;font-weight:500}
 .ppos{color:var(--green)}.pneg{color:var(--red)}
-.pmeta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-bottom:6px}
+.pmeta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px}
 .pkv{display:flex;flex-direction:column;gap:1px}
 .pk{font-size:8px;color:var(--g2);letter-spacing:.4px;text-transform:uppercase}
 .pv{font-size:11px;color:var(--w)}
@@ -112,24 +116,27 @@ body{padding:12px;overflow-y:auto}
 .tps.hit{background:var(--or)}
 .tps.next{background:var(--ordim);border:0.5px solid var(--or);animation:ptpulse 1.5s ease infinite}
 @keyframes ptpulse{0%,100%{opacity:.4}50%{opacity:1}}
-.tplbl{display:flex;justify-content:space-between;font-size:9px;color:var(--g2)}
+.tplbl{display:flex;justify-content:space-between;font-size:9px;color:var(--g2);margin-bottom:6px}
+.close-btn{font-size:9px;padding:2px 8px;border-radius:3px;border:0.5px solid #5c1a1a;
+  background:transparent;color:var(--red);cursor:pointer;width:100%}
+.close-btn:hover{background:#1f0505}
 .npos{padding:16px 11px;font-size:11px;color:var(--g2);text-align:center}
 
-/* score card */
+/* orchestrator */
 .scorecenter{padding:13px 11px;text-align:center}
 .bigscore{font-size:50px;font-weight:500;color:var(--or);line-height:1;transition:color .3s}
 .bigscore.mid{color:var(--yel)}.bigscore.lo{color:var(--g1)}
 .scorelbl{font-size:9px;letter-spacing:2px;color:var(--g1);margin-top:3px;text-transform:uppercase}
 .verdict{font-size:10px;padding:3px 11px;border-radius:3px;display:inline-block;
-  margin-top:7px;letter-spacing:.4px;border:0.5px solid var(--or);
-  background:var(--ordim);color:var(--or2);transition:all .3s}
+  margin-top:7px;letter-spacing:.4px;transition:all .3s;
+  border:0.5px solid var(--or);background:var(--ordim);color:var(--or2)}
 .agrid{padding:9px 11px;display:grid;grid-template-columns:1fr 1fr;gap:7px}
 .ac{background:var(--bg3);border:0.5px solid var(--b);border-radius:5px;padding:7px 9px}
 .an{font-size:8px;letter-spacing:1px;color:var(--g1);margin-bottom:4px;text-transform:uppercase}
 .arow{display:flex;align-items:center;gap:7px}
 .anum{font-size:19px;font-weight:500;color:var(--or2);min-width:32px}
 .amb{flex:1;height:3px;background:var(--bg);border-radius:2px;overflow:hidden}
-.amf{height:100%;background:var(--or);border-radius:2px;transition:width .7s ease}
+.amf{height:100%;background:var(--or);border-radius:2px;transition:width .7s}
 
 /* equity */
 .chartwrap{padding:9px 11px 11px}
@@ -142,11 +149,35 @@ body{padding:12px;overflow-y:auto}
 .rk{font-size:10px;color:var(--g1)}.rv{font-size:10px;color:var(--w)}
 .rv.ok{color:var(--green)}.rv.warn{color:var(--yel)}.rv.hot{color:var(--or2)}
 
-.s2{grid-column:span 2}
-.s3{grid-column:1/-1}
+/* CONTROL PANEL */
+.ctrl-panel{padding:11px 12px;display:flex;flex-direction:column;gap:10px}
+.ctrl-section{display:flex;flex-direction:column;gap:6px}
+.ctrl-lbl{font-size:9px;letter-spacing:1px;color:var(--g1);text-transform:uppercase;margin-bottom:2px}
+.ctrl-row{display:flex;align-items:center;gap:8px}
+.lev-input{width:60px;font-family:var(--mono);font-size:12px;padding:4px 8px;
+  background:var(--bg3);border:0.5px solid var(--b2);border-radius:4px;color:var(--w)}
+.lev-input:focus{outline:none;border-color:var(--or)}
+.sym-select{flex:1;font-family:var(--mono);font-size:11px;padding:4px 8px;
+  background:var(--bg3);border:0.5px solid var(--b2);border-radius:4px;color:var(--w)}
+.sym-select:focus{outline:none;border-color:var(--or)}
+.apply-btn{font-size:10px;padding:4px 12px;border-radius:3px;border:0.5px solid var(--or);
+  background:var(--ordim);color:var(--or2);cursor:pointer;transition:all .15s;white-space:nowrap}
+.apply-btn:hover{background:var(--or);color:#000}
+.lev-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.lev-preset{font-size:10px;padding:4px 0;border-radius:3px;border:0.5px solid var(--b2);
+  background:var(--bg3);color:var(--g1);cursor:pointer;text-align:center;transition:all .15s}
+.lev-preset:hover{border-color:var(--or);color:var(--or2)}
+.lev-preset.active{background:var(--ordim);border-color:var(--or);color:var(--or2)}
+.ctrl-divider{height:0.5px;background:var(--b)}
+.feedback{font-size:10px;padding:4px 8px;border-radius:3px;background:var(--bg3);
+  color:var(--green);min-height:24px;display:flex;align-items:center}
+.pause-row{display:flex;gap:6px}
+.pause-btn{flex:1;font-size:10px;padding:5px 0;border-radius:3px;border:0.5px solid var(--b2);
+  background:var(--bg3);color:var(--g1);cursor:pointer;text-align:center;transition:all .15s}
+.pause-btn:hover{border-color:var(--yel);color:var(--yel)}
+.pause-btn.active{background:#2a1500;border-color:var(--yel);color:var(--yel)}
 
-/* connecting overlay */
-.connecting{grid-column:1/-1;text-align:center;padding:40px;color:var(--g1);font-size:12px}
+.s2{grid-column:span 2}.s3{grid-column:1/-1}
 
 @media(max-width:900px){.dash{grid-template-columns:1fr 1fr}.metrics{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:580px){.dash{grid-template-columns:1fr}.metrics{grid-template-columns:1fr 1fr}.s2{grid-column:1}}
@@ -155,7 +186,6 @@ body{padding:12px;overflow-y:auto}
 <body>
 <div class="dash" id="dash">
 
-<!-- HEADER -->
 <div class="hdr">
   <div class="hdr-l">
     <div class="pulse" id="pulse"></div>
@@ -165,28 +195,28 @@ body{padding:12px;overflow-y:auto}
     <div class="pill">COINS<b>20</b></div>
     <div class="pill">UPTIME<b id="uptime">—</b></div>
   </div>
-  <div class="hdr-ts" id="hdr-ts">connecting...</div>
+  <div class="hdr-r">
+    <div class="hdr-ts" id="hdr-ts">—</div>
+  </div>
 </div>
 
-<!-- API BAR -->
 <div class="apibar">
   <div class="api"><div class="adot ok" id="dot-ws"></div>WebSocket</div>
   <span class="asep">|</span>
-  <div class="api"><div class="adot ok" id="dot-rest"></div>REST API</div>
+  <div class="api"><div class="adot ok"></div>REST API</div>
   <span class="asep">|</span>
-  <div class="api"><div class="adot ok" id="dot-feed"></div>Feed Manager</div>
+  <div class="api"><div class="adot ok"></div>Feed Manager</div>
   <span class="asep">|</span>
   <div class="api"><div class="adot warn"></div>Funding (testnet)</div>
   <span class="asep">|</span>
-  <div class="aright" id="stream-status">connecting to /stream...</div>
+  <div class="aright" id="stream-status">connecting...</div>
 </div>
 
-<!-- METRICS -->
 <div class="metrics">
   <div class="mc hot"><div class="mlbl">Balance</div>
     <div class="mval or" id="m-bal">—</div><div class="msub pos">▲ all time</div></div>
   <div class="mc up"><div class="mlbl">Daily P&L</div>
-    <div class="mval gr" id="m-pnl">—</div><div class="msub pos" id="m-pnlpct">—</div></div>
+    <div class="mval gr" id="m-pnl">—</div><div class="msub" id="m-pnlpct">—</div></div>
   <div class="mc"><div class="mlbl">Win rate</div>
     <div class="mval" id="m-wr">—</div><div class="msub" id="m-wl">—</div></div>
   <div class="mc"><div class="mlbl">Open pos.</div>
@@ -195,14 +225,12 @@ body{padding:12px;overflow-y:auto}
     <div class="mval" id="m-dd">—</div><div class="msub">limit 8%</div></div>
 </div>
 
-<!-- LOG -->
 <div class="card s2">
   <div class="chdr"><div class="ctitle">system log</div>
-    <div class="badge bor" id="log-badge">LIVE</div></div>
+    <div class="badge bor">LIVE</div></div>
   <div class="logwrap" id="log-wrap"></div>
 </div>
 
-<!-- ORCHESTRATOR -->
 <div class="card">
   <div class="chdr"><div class="ctitle">orchestrator score</div>
     <div class="badge bor" id="orch-sym">—</div></div>
@@ -227,14 +255,14 @@ body{padding:12px;overflow-y:auto}
   </div>
 </div>
 
-<!-- SIGNALS -->
 <div class="card">
   <div class="chdr"><div class="ctitle">signal leaderboard</div>
     <div class="badge bgy">20 coins</div></div>
-  <div class="slist" id="sig-list"><div style="padding:14px;color:var(--g2);font-size:11px">Waiting for signals...</div></div>
+  <div class="slist" id="sig-list">
+    <div style="padding:14px;color:var(--g2);font-size:11px">Waiting for candle closes...</div>
+  </div>
 </div>
 
-<!-- POSITIONS -->
 <div class="card">
   <div class="chdr"><div class="ctitle">open positions</div>
     <div class="badge bgr" id="pos-badge">0 ACTIVE</div></div>
@@ -243,7 +271,6 @@ body{padding:12px;overflow-y:auto}
   </div>
 </div>
 
-<!-- EQUITY -->
 <div class="card">
   <div class="chdr"><div class="ctitle">equity curve</div>
     <div class="badge bgy">session</div></div>
@@ -252,16 +279,76 @@ body{padding:12px;overflow-y:auto}
   </div>
 </div>
 
-<!-- RISK -->
+<!-- CONTROL PANEL -->
+<div class="card">
+  <div class="chdr"><div class="ctitle">control panel</div>
+    <div class="badge byel">LIVE</div></div>
+  <div class="ctrl-panel">
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Kaldıraç ayarı</div>
+      <div class="lev-grid">
+        <div class="lev-preset" onclick="setPresetLev(1)">x1</div>
+        <div class="lev-preset" onclick="setPresetLev(2)">x2</div>
+        <div class="lev-preset" onclick="setPresetLev(3)">x3</div>
+        <div class="lev-preset" onclick="setPresetLev(5)">x5</div>
+        <div class="lev-preset" onclick="setPresetLev(10)">x10</div>
+      </div>
+      <div class="ctrl-row">
+        <select class="sym-select" id="lev-sym">
+          <option value="">Tüm coinler (global)</option>
+          <option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option>
+          <option>BNBUSDT</option><option>XRPUSDT</option><option>ADAUSDT</option>
+          <option>DOGEUSDT</option><option>AVAXUSDT</option><option>LINKUSDT</option>
+          <option>DOTUSDT</option><option>NEARUSDT</option><option>APTUSDT</option>
+          <option>ARBUSDT</option><option>OPUSDT</option><option>INJUSDT</option>
+          <option>SUIUSDT</option><option>UNIUSDT</option><option>ATOMUSDT</option>
+          <option>LTCUSDT</option><option>MATICUSDT</option>
+        </select>
+        <input type="number" class="lev-input" id="lev-val" min="1" max="20" value="1">
+        <button class="apply-btn" onclick="applyLeverage()">Uygula</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Bot kontrolü</div>
+      <div class="pause-row">
+        <button class="pause-btn" id="btn-pause" onclick="pauseBot()">⏸ Durdur</button>
+        <button class="pause-btn" id="btn-resume" onclick="resumeBot()">▶ Devam</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Pozisyon kapat</div>
+      <div class="ctrl-row">
+        <select class="sym-select" id="close-sym">
+          <option value="">— Seç —</option>
+        </select>
+        <button class="apply-btn" style="border-color:#5c1a1a;color:var(--red);background:#1f0505"
+                onclick="forceClose()">Kapat</button>
+      </div>
+    </div>
+
+    <div class="feedback" id="ctrl-feedback">—</div>
+
+  </div>
+</div>
+
+<!-- RISK PANEL -->
 <div class="card">
   <div class="chdr"><div class="ctitle">risk manager</div>
     <div class="badge bgr" id="risk-badge">HEALTHY</div></div>
   <div class="rrows" id="risk-rows">
-    <div class="rrow"><span class="rk">portfolio risk</span><span class="rv ok" id="rk-pr">—</span></div>
-    <div class="rrow"><span class="rk">drawdown</span><span class="rv ok" id="rk-dd">—</span></div>
-    <div class="rrow"><span class="rk">circuit breaker</span><span class="rv ok" id="rk-cb">8.0% — OFF</span></div>
+    <div class="rrow"><span class="rk">portfolio risk</span><span class="rv ok">0.0%</span></div>
+    <div class="rrow"><span class="rk">drawdown</span><span class="rv ok" id="rk-dd">0.0%</span></div>
+    <div class="rrow"><span class="rk">circuit breaker</span><span class="rv ok" id="rk-cb">OFF</span></div>
     <div class="rrow"><span class="rk">correlation filter</span><span class="rv ok">PASS</span></div>
-    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">— / 3</span></div>
+    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / 3</span></div>
+    <div class="rrow"><span class="rk">global leverage</span><span class="rv hot" id="rk-lev">x1</span></div>
     <div class="rrow"><span class="rk">wins / losses</span><span class="rv" id="rk-wl">—</span></div>
     <div class="rrow"><span class="rk">uptime</span><span class="rv" id="rk-up">—</span></div>
   </div>
@@ -270,230 +357,236 @@ body{padding:12px;overflow-y:auto}
 </div>
 
 <script>
-var eqChart = new Chart(document.getElementById('eq-chart'), {
-  type: 'line',
-  data: {
-    labels: [],
-    datasets: [{
-      data: [],
-      borderColor: '#e8621a', borderWidth: 1.5,
-      pointRadius: 0, fill: true,
-      backgroundColor: 'rgba(232,98,26,0.06)', tension: 0.4
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    scales: {
-      x: { display: false },
-      y: { display: true, position: 'right',
-        grid: { color: 'rgba(255,255,255,0.04)' },
-        ticks: { color: '#555', font: { family: 'JetBrains Mono', size: 9 },
-          callback: function(v){ return '$' + Math.round(v); } } }
-    }
-  }
+var eqChart = new Chart(document.getElementById('eq-chart'),{
+  type:'line',
+  data:{labels:[],datasets:[{data:[],borderColor:'#e8621a',borderWidth:1.5,
+    pointRadius:0,fill:true,backgroundColor:'rgba(232,98,26,0.06)',tension:0.4}]},
+  options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false},tooltip:{enabled:false}},
+    scales:{x:{display:false},y:{display:true,position:'right',
+      grid:{color:'rgba(255,255,255,0.04)'},
+      ticks:{color:'#555',font:{family:'JetBrains Mono',size:9},
+        callback:function(v){return '$'+Math.round(v)}}}}}
 });
 
-function $(id){ return document.getElementById(id); }
-function set(id, val){ var e=$(id); if(e) e.textContent = val; }
-function setClass(id, cls){ var e=$(id); if(e) e.className = cls; }
+function $(id){return document.getElementById(id)}
+function set(id,v){var e=$(id);if(e)e.textContent=v}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
-function renderLogs(logs) {
-  var w = $('log-wrap'); if(!w) return;
-  if(!logs || !logs.length){ w.innerHTML = '<div style="padding:14px;color:var(--g2);font-size:11px">No logs yet...</div>'; return; }
-  w.innerHTML = logs.slice(0,8).map(function(l, i){
-    var lvlCls = {info:'li', ok:'lo', warn:'lw', err:'le', sig:'ls'}[l.lvl] || 'li';
-    return '<div class="ll">' +
-      '<span class="lts">' + l.ts + '</span>' +
-      '<span class="llvl ' + lvlCls + '">' + l.lvl.toUpperCase() + '</span>' +
-      '<span class="lmsg">' + escHtml(l.msg) + '</span>' +
-      (i === 0 ? '<span class="cur"></span>' : '') +
-      '</div>';
+function renderLogs(logs){
+  var w=$('log-wrap');if(!w)return;
+  if(!logs||!logs.length){w.innerHTML='<div style="padding:14px;color:var(--g2)">No logs yet...</div>';return;}
+  w.innerHTML=logs.slice(0,10).map(function(l,i){
+    var lc={info:'li',ok:'lo',warn:'lw',err:'le',sig:'ls'}[l.lvl]||'li';
+    return '<div class="ll"><span class="lts">'+l.ts+'</span>'
+      +'<span class="llvl '+lc+'">'+l.lvl.toUpperCase()+'</span>'
+      +'<span class="lmsg">'+esc(l.msg)+'</span>'
+      +(i===0?'<span class="cur"></span>':'')
+      +'</div>';
   }).join('');
 }
 
-function renderSignals(signals) {
-  var w = $('sig-list'); if(!w) return;
-  var entries = Object.entries(signals || {});
-  if(!entries.length){ w.innerHTML = '<div style="padding:14px;color:var(--g2);font-size:11px">Waiting for candle closes...</div>'; return; }
-  entries.sort(function(a,b){ return b[1].score - a[1].score; });
-  w.innerHTML = entries.slice(0,8).map(function(e){
-    var sym = e[0].replace('USDT','');
-    var sc = e[1].score || 0;
-    var dir = e[1].direction || 'none';
-    var barColor = sc >= 75 ? '#e8621a' : sc >= 60 ? '#fbbf24' : '#555';
-    var scCls = sc >= 75 ? 'ssc shi' : sc >= 60 ? 'ssc smi' : 'ssc slo';
-    var dirCls = dir==='long'?'sdir dl':dir==='short'?'sdir ds':'sdir dn';
-    var dirLbl = dir==='long'?'LONG':dir==='short'?'SHORT':'—';
-    return '<div class="srow">' +
-      '<div class="ssym">' + sym + '</div>' +
-      '<div class="' + dirCls + '">' + dirLbl + '</div>' +
-      '<div class="sbw"><div class="sb" style="width:' + sc + '%;background:' + barColor + '"></div></div>' +
-      '<div class="' + scCls + '">' + Math.round(sc) + '</div>' +
-      '</div>';
+function renderSignals(signals){
+  var w=$('sig-list');if(!w)return;
+  var entries=Object.entries(signals||{});
+  if(!entries.length){w.innerHTML='<div style="padding:14px;color:var(--g2)">Waiting for candle closes...</div>';return;}
+  entries.sort(function(a,b){return b[1].score-a[1].score});
+  w.innerHTML=entries.slice(0,8).map(function(e){
+    var sym=e[0].replace('USDT',''),sc=e[1].score||0,dir=e[1].direction||'none';
+    var bc=sc>=75?'#e8621a':sc>=65?'#fbbf24':'#555';
+    var scCls=sc>=75?'ssc shi':sc>=65?'ssc smi':'ssc slo';
+    var dc=dir==='long'?'sdir dl':dir==='short'?'sdir ds':'sdir dn';
+    var dl=dir==='long'?'LONG':dir==='short'?'SHORT':'—';
+    return '<div class="srow"><div class="ssym">'+sym+'</div>'
+      +'<div class="'+dc+'">'+dl+'</div>'
+      +'<div class="sbw"><div class="sb" style="width:'+sc+'%;background:'+bc+'"></div></div>'
+      +'<div class="'+scCls+'">'+Math.round(sc)+'</div></div>';
   }).join('');
 }
 
-function renderPositions(positions) {
-  var w = $('pos-list'); if(!w) return;
-  var posCount = Object.keys(positions || {}).length;
-  var badge = $('pos-badge');
-  if(badge) badge.textContent = posCount + ' ACTIVE';
-  if(badge) badge.className = posCount > 0 ? 'badge bgr' : 'badge bgy';
-
-  if(!posCount){ w.innerHTML = '<div class="npos">No open positions</div>'; return; }
-
-  w.innerHTML = Object.entries(positions).map(function(e){
-    var sym = e[0]; var p = e[1];
-    var pnl = p.pnl || 0;
-    var pnlCls = pnl >= 0 ? 'ppnl ppos' : 'ppnl pneg';
-    var pnlStr = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' USDT';
-    var dirColor = p.direction === 'long' ? 'var(--green)' : 'var(--red)';
-    var tp1cls = p.tp1_hit ? 'tps hit' : 'tps next';
-    var tp2cls = p.tp2_hit ? 'tps hit' : (p.tp1_hit ? 'tps next' : 'tps');
-    var tp3cls = 'tps';
-    return '<div class="pc">' +
-      '<div class="ptop"><div class="psym">' + sym + '</div><div class="' + pnlCls + '">' + pnlStr + '</div></div>' +
-      '<div class="pmeta">' +
-        '<div class="pkv"><div class="pk">direction</div><div class="pv" style="color:' + dirColor + '">' + p.direction.toUpperCase() + '</div></div>' +
-        '<div class="pkv"><div class="pk">entry</div><div class="pv">' + (+p.entry).toFixed(4) + '</div></div>' +
-        '<div class="pkv"><div class="pk">qty</div><div class="pv">' + (+p.qty).toFixed(4) + '</div></div>' +
-        '<div class="pkv"><div class="pk">stop loss</div><div class="pv" style="color:var(--red)">' + (+p.sl).toFixed(4) + '</div></div>' +
-        '<div class="pkv"><div class="pk">current</div><div class="pv">$' + (+p.current).toFixed(2) + '</div></div>' +
-        '<div class="pkv"><div class="pk">score</div><div class="pv" style="color:var(--or)">' + Math.round(p.score||0) + '</div></div>' +
-      '</div>' +
-      '<div class="tpbar"><div class="' + tp1cls + '"></div><div class="' + tp2cls + '"></div><div class="' + tp3cls + '"></div></div>' +
-      '<div class="tplbl">' +
-        '<span style="color:' + (p.tp1_hit?'var(--green)':'var(--or)') + '">TP1' + (p.tp1_hit?' ✓':' →') + ' ' + (+p.tp1).toFixed(2) + '</span>' +
-        '<span style="color:' + (p.tp2_hit?'var(--green)':p.tp1_hit?'var(--or)':'var(--g2)') + '">TP2 ' + (+p.tp2).toFixed(2) + '</span>' +
-        '<span>TP3 ' + (+p.tp3).toFixed(2) + '</span>' +
-      '</div>' +
-      '</div>';
-  }).join('');
-}
-
-function renderOrchestrator(best) {
-  if(!best){ return; }
-  $('orch-sym').textContent = best.symbol || '—';
-  var sc = Math.round(best.score || 0);
-  var el = $('orch-score');
-  if(el){ el.textContent = sc; el.className = sc >= 75 ? 'bigscore' : sc >= 60 ? 'bigscore mid' : 'bigscore lo'; }
-  var v = $('orch-verdict');
-  if(v){
-    if(sc>=75){ v.textContent='SIGNAL ACTIVE'; v.style.color='var(--or2)'; v.style.borderColor='var(--or)'; }
-    else if(sc>=60){ v.textContent='MONITORING'; v.style.color='var(--yel)'; v.style.borderColor='var(--yel)'; }
-    else{ v.textContent='NO SIGNAL'; v.style.color='var(--g1)'; v.style.borderColor='var(--b)'; }
+function renderPositions(positions){
+  var w=$('pos-list');if(!w)return;
+  var keys=Object.keys(positions||{});
+  var badge=$('pos-badge');
+  if(badge){badge.textContent=keys.length+' ACTIVE';badge.className=keys.length>0?'badge bgr':'badge bgy';}
+  // Update close dropdown
+  var sel=$('close-sym');
+  if(sel){
+    sel.innerHTML='<option value="">— Seç —</option>';
+    keys.forEach(function(k){var o=document.createElement('option');o.value=k;o.textContent=k;sel.appendChild(o);});
   }
-  var ag = best.agents || {};
-  ['mom','of','fu','lq'].forEach(function(k,i){
-    var key = ['momentum','orderflow','funding','liquidation'][i];
-    var v = Math.round(ag[key]||0);
-    set('ag-'+k, v);
-    var b = $('agb-'+k); if(b) b.style.width = v + '%';
+  if(!keys.length){w.innerHTML='<div class="npos">No open positions</div>';return;}
+  w.innerHTML=keys.map(function(sym){
+    var p=positions[sym];
+    var pnl=p.pnl||0;
+    var pnlCls=pnl>=0?'ppnl ppos':'ppnl pneg';
+    var pnlStr=(pnl>=0?'+':'')+pnl.toFixed(2)+' USDT';
+    var dc=p.direction==='long'?'var(--green)':'var(--red)';
+    var tp1c=p.tp1_hit?'tps hit':'tps next';
+    var tp2c=p.tp2_hit?'tps hit':(p.tp1_hit?'tps next':'tps');
+    var rr=p.rr_ratio?'R:R '+p.rr_ratio:'';
+    return '<div class="pc">'
+      +'<div class="ptop"><div class="psym">'+sym+'</div><div class="'+pnlCls+'">'+pnlStr+'</div></div>'
+      +'<div class="pmeta">'
+        +'<div class="pkv"><div class="pk">direction</div><div class="pv" style="color:'+dc+'">'+p.direction.toUpperCase()+'</div></div>'
+        +'<div class="pkv"><div class="pk">entry</div><div class="pv">'+Number(p.entry).toFixed(4)+'</div></div>'
+        +'<div class="pkv"><div class="pk">qty</div><div class="pv">'+p.qty+'</div></div>'
+        +'<div class="pkv"><div class="pk">stop loss</div><div class="pv" style="color:var(--red)">'+Number(p.sl).toFixed(4)+'</div></div>'
+        +'<div class="pkv"><div class="pk">current</div><div class="pv">$'+Number(p.current).toFixed(2)+'</div></div>'
+        +'<div class="pkv"><div class="pk">lev / R:R</div><div class="pv" style="color:var(--or)">x'+p.leverage+' / '+p.rr_ratio+'</div></div>'
+      +'</div>'
+      +'<div class="tpbar"><div class="'+tp1c+'"></div><div class="'+tp2c+'"></div><div class="tps"></div></div>'
+      +'<div class="tplbl">'
+        +'<span style="color:'+(p.tp1_hit?'var(--green)':'var(--or)')+'">TP1 '+(p.tp1_hit?'✓':'')+Number(p.tp1).toFixed(4)+'</span>'
+        +'<span style="color:'+(p.tp2_hit?'var(--green)':p.tp1_hit?'var(--or)':'var(--g2)')+'">TP2 '+Number(p.tp2).toFixed(4)+'</span>'
+        +'<span>TP3 '+Number(p.tp3).toFixed(4)+'</span>'
+      +'</div>'
+      +'<button class="close-btn" onclick="forceCloseSymbol(\''+sym+'\')">Pozisyonu Kapat (Market)</button>'
+      +'</div>';
+  }).join('');
+}
+
+function renderOrch(best){
+  if(!best)return;
+  $('orch-sym').textContent=best.symbol||'—';
+  var sc=Math.round(best.score||0);
+  var el=$('orch-score');
+  if(el){el.textContent=sc;el.className=sc>=75?'bigscore':sc>=65?'bigscore mid':'bigscore lo';}
+  var v=$('orch-verdict');
+  if(v){
+    if(sc>=75){v.textContent='SIGNAL ACTIVE';v.style.color='var(--or2)';v.style.borderColor='var(--or)';}
+    else if(sc>=65){v.textContent='MONITORING';v.style.color='var(--yel)';v.style.borderColor='var(--yel)';}
+    else{v.textContent='NO SIGNAL';v.style.color='var(--g1)';v.style.borderColor='var(--b)';}
+  }
+  var ag=best.agents||{};
+  [['mom','momentum'],['of','orderflow'],['fu','funding'],['lq','liquidation']].forEach(function(pair){
+    var val=Math.round(ag[pair[1]]||0);
+    set('ag-'+pair[0],val);
+    var b=$('agb-'+pair[0]);if(b)b.style.width=val+'%';
   });
 }
 
-function updateEquity(history) {
-  if(!history || !history.length) return;
-  var labels = history.map(function(h){ return h.ts; });
-  var data   = history.map(function(h){ return h.balance; });
-  eqChart.data.labels = labels;
-  eqChart.data.datasets[0].data = data;
-  eqChart.update('none');
-}
-
-function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-function applyState(d) {
-  if(!d || !d.balance) return;
-
-  // Header
-  set('uptime', d.uptime || '—');
-  var now = new Date();
-  set('hdr-ts', now.toISOString().replace('T',' — ').slice(0,22) + ' UTC');
-
-  // Metrics
-  set('m-bal', '$' + Math.round(d.balance).toLocaleString());
-  var pnl = d.daily_pnl || 0;
-  set('m-pnl', (pnl>=0?'+$':'$') + Math.abs(pnl).toFixed(2));
-  var pnlEl = $('m-pnl');
-  if(pnlEl) pnlEl.className = 'mval ' + (pnl>=0?'gr':'rd');
-  var total = (d.wins||0) + (d.losses||0);
-  var wr = total > 0 ? ((d.wins/total)*100).toFixed(1)+'%' : '—';
-  set('m-wr', wr);
-  set('m-wl', (d.wins||0)+'W / '+(d.losses||0)+'L');
-  var posCount = Object.keys(d.open_positions||{}).length;
-  set('m-pos', posCount);
-  var dd = d.drawdown_pct || 0;
-  var ddEl = $('m-dd');
-  if(ddEl){ ddEl.textContent = dd.toFixed(1)+'%'; ddEl.className = 'mval '+(dd>=5?'rd':dd>=3?'or':''); }
-
-  // Risk
-  set('rk-pr', ((d.wins||0)+(d.losses||0) > 0 ? '1.5%' : '0.0%'));
-  set('rk-dd', dd.toFixed(1)+'%');
-  var ddRkEl = $('rk-dd'); if(ddRkEl) ddRkEl.className = 'rv '+(dd>=5?'warn':dd>=3?'hot':'ok');
-  set('rk-cb', dd.toFixed(1)+'% — '+(dd>=8?'ON':'OFF'));
-  set('rk-om', posCount+' / 3');
-  set('rk-wl', (d.wins||0)+' / '+(d.losses||0));
-  set('rk-up', d.uptime || '—');
-  var riskBadge = $('risk-badge');
-  if(riskBadge){ riskBadge.textContent = dd>=8?'HALTED':dd>=5?'WARNING':'HEALTHY'; riskBadge.className = dd>=8?'badge bred':dd>=5?'badge bgy':'badge bgr'; }
-
-  // Logs
-  renderLogs(d.logs || []);
-
-  // Signals
-  renderSignals(d.last_signals || {});
-
-  // Positions
-  renderPositions(d.open_positions || {});
-
-  // Orchestrator
-  if(d.best_signal) renderOrchestrator(d.best_signal);
-
-  // Equity
-  if(d.equity_history && d.equity_history.length > 0) {
-    updateEquity(d.equity_history);
+function applyState(d){
+  if(!d||!d.balance)return;
+  set('uptime',d.uptime||'—');
+  var now=new Date();
+  set('hdr-ts',now.toISOString().replace('T',' — ').slice(0,22)+' UTC');
+  set('m-bal','$'+Math.round(d.balance).toLocaleString());
+  var pnl=d.daily_pnl||0;
+  set('m-pnl',(pnl>=0?'+$':'$')+Math.abs(pnl).toFixed(2));
+  var pe=$('m-pnl');if(pe)pe.className='mval '+(pnl>=0?'gr':'rd');
+  var tot=(d.wins||0)+(d.losses||0);
+  set('m-wr',tot>0?((d.wins/tot)*100).toFixed(1)+'%':'—');
+  set('m-wl',(d.wins||0)+'W / '+(d.losses||0)+'L');
+  set('m-pos',Object.keys(d.open_positions||{}).length);
+  var dd=d.drawdown_pct||0;
+  var dde=$('m-dd');
+  if(dde){dde.textContent=dd.toFixed(1)+'%';dde.className='mval '+(dd>=8?'rd':dd>=5?'or':'');}
+  var pos=Object.keys(d.open_positions||{}).length;
+  set('rk-dd',dd.toFixed(1)+'%');
+  var rdd=$('rk-dd');if(rdd)rdd.className='rv '+(dd>=5?'warn':dd>=3?'hot':'ok');
+  set('rk-cb',dd.toFixed(1)+'% — '+(dd>=8?'ON':'OFF'));
+  set('rk-om',pos+' / 3');
+  set('rk-wl',(d.wins||0)+' / '+(d.losses||0));
+  set('rk-up',d.uptime||'—');
+  set('rk-lev','x'+(d.global_leverage||1));
+  var rb=$('risk-badge');
+  if(rb){rb.textContent=dd>=8?'HALTED':dd>=5?'WARNING':'HEALTHY';rb.className=dd>=8?'badge bred':dd>=5?'badge byel':'badge bgr';}
+  renderLogs(d.logs||[]);
+  renderSignals(d.last_signals||{});
+  renderPositions(d.open_positions||{});
+  if(d.best_signal)renderOrch(d.best_signal);
+  if(d.equity_history&&d.equity_history.length){
+    eqChart.data.labels=d.equity_history.map(function(h){return h.ts;});
+    eqChart.data.datasets[0].data=d.equity_history.map(function(h){return h.balance;});
+    eqChart.update('none');
   }
+  // Update leverage preset highlights
+  var gl=d.global_leverage||1;
+  document.querySelectorAll('.lev-preset').forEach(function(b){
+    b.classList.remove('active');
+    if(b.textContent==='x'+gl)b.classList.add('active');
+  });
+  $('lev-val').value=gl;
 }
 
-// ── SSE connection ──────────────────────────────────────────
-var sse = null;
-var retryDelay = 2000;
+// ── Control functions ─────────────────────────────────────
 
-function connectSSE() {
-  $('stream-status').textContent = 'connecting...';
-  $('pulse').style.background = 'var(--yel)';
+var currentLev=1;
+function setPresetLev(v){
+  currentLev=v;
+  $('lev-val').value=v;
+  document.querySelectorAll('.lev-preset').forEach(function(b){
+    b.classList.toggle('active',b.textContent==='x'+v);
+  });
+}
 
-  sse = new EventSource('/stream');
+function feedback(msg,ok){
+  var el=$('ctrl-feedback');
+  if(!el)return;
+  el.textContent=msg;
+  el.style.color=ok===false?'var(--red)':'var(--green)';
+}
 
-  sse.onopen = function() {
-    $('stream-status').textContent = 'streams: live';
-    $('pulse').style.background = 'var(--or)';
-    $('dot-ws').className = 'adot ok';
-    $('dot-rest').className = 'adot ok';
-    $('dot-feed').className = 'adot ok';
-    retryDelay = 2000;
+async function applyLeverage(){
+  var sym=$('lev-sym').value||null;
+  var lev=parseInt($('lev-val').value)||1;
+  try{
+    var r=await fetch('/control/leverage?'+(sym?'symbol='+sym+'&':'')+'leverage='+lev,{method:'POST'});
+    var d=await r.json();
+    feedback(d.msg||'OK',d.ok);
+    if(d.ok&&!sym)document.querySelectorAll('.lev-preset').forEach(function(b){b.classList.toggle('active',b.textContent==='x'+lev);});
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function forceCloseSymbol(sym){
+  if(!confirm(sym+' pozisyonunu market emirle kapatmak istiyor musun?'))return;
+  try{
+    var r=await fetch('/control/close/'+sym,{method:'POST'});
+    var d=await r.json();
+    feedback(d.msg||'OK',d.ok);
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function forceClose(){
+  var sym=$('close-sym').value;
+  if(!sym){feedback('Coin seçin',false);return;}
+  await forceCloseSymbol(sym);
+}
+
+async function pauseBot(){
+  try{var r=await fetch('/control/pause',{method:'POST'});var d=await r.json();feedback(d.msg,'ok');}
+  catch(e){feedback('Hata: '+e,false);}
+}
+
+async function resumeBot(){
+  try{var r=await fetch('/control/resume',{method:'POST'});var d=await r.json();feedback(d.msg,'ok');}
+  catch(e){feedback('Hata: '+e,false);}
+}
+
+// ── SSE ───────────────────────────────────────────────────
+var sse=null,retryDelay=2000;
+function connectSSE(){
+  $('stream-status').textContent='connecting...';
+  sse=new EventSource('/stream');
+  sse.onopen=function(){
+    $('stream-status').textContent='streams: live';
+    $('pulse').style.background='var(--or)';
+    $('dot-ws').className='adot ok';
+    retryDelay=2000;
   };
-
-  sse.onmessage = function(e) {
-    try {
-      var d = JSON.parse(e.data);
-      if(d && d.balance) applyState(d);
-    } catch(err) { }
+  sse.onmessage=function(e){
+    try{var d=JSON.parse(e.data);if(d&&d.balance)applyState(d);}catch(_){}
   };
-
-  sse.onerror = function() {
+  sse.onerror=function(){
     sse.close();
-    $('stream-status').textContent = 'reconnecting in ' + (retryDelay/1000).toFixed(0) + 's...';
-    $('pulse').style.background = 'var(--red)';
-    $('dot-ws').className = 'adot off';
-    $('dot-feed').className = 'adot off';
-    setTimeout(connectSSE, retryDelay);
-    retryDelay = Math.min(retryDelay * 1.5, 30000);
+    $('stream-status').textContent='reconnecting in '+(retryDelay/1000).toFixed(0)+'s...';
+    $('pulse').style.background='var(--red)';
+    $('dot-ws').className='adot off';
+    setTimeout(connectSSE,retryDelay);
+    retryDelay=Math.min(retryDelay*1.5,30000);
   };
 }
-
 connectSSE();
 </script>
 </body>

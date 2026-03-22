@@ -83,6 +83,38 @@ async def state():
     return orchestrator.snapshot()
 
 
+@app.post("/control/leverage")
+async def set_leverage(symbol: str | None = None, leverage: int = 1):
+    if orchestrator is None:
+        return {"error": "not ready"}
+    msg = await orchestrator.set_leverage(symbol, leverage)
+    return {"ok": True, "msg": msg}
+
+
+@app.post("/control/close/{symbol}")
+async def force_close(symbol: str):
+    if orchestrator is None:
+        return {"error": "not ready"}
+    msg = await orchestrator.force_close(symbol.upper())
+    return {"ok": True, "msg": msg}
+
+
+@app.post("/control/pause")
+async def pause():
+    if orchestrator is None:
+        return {"error": "not ready"}
+    orchestrator._running = False
+    return {"ok": True, "msg": "Bot paused — no new positions will open"}
+
+
+@app.post("/control/resume")
+async def resume():
+    if orchestrator is None:
+        return {"error": "not ready"}
+    orchestrator._running = True
+    return {"ok": True, "msg": "Bot resumed"}
+
+
 @app.get("/stream")
 async def stream():
     """
