@@ -72,9 +72,9 @@ class Settings:
     # ── Watchlist ön filtresi ────────────────────────────────
     # Binance'tan çekilen tüm coinlere uygulanır.
     # Sadece ÜÇ koşulu birden sağlayanlar listeye girer.
-    min_volume_usdt:    float = float(os.getenv("MIN_VOLUME_USDT",    "50000000"))   # 50M USDT/gün
-    min_atr_pct:        float = float(os.getenv("MIN_ATR_PCT",        "0.08"))       # min %0.08/bar (çok durgun olmasın)
-    max_atr_pct:        float = float(os.getenv("MAX_ATR_PCT",        "0.50"))       # max %0.50/bar (çok çılgın olmasın)
+    min_volume_usdt:    float = float(os.getenv("MIN_VOLUME_USDT",    "10000000"))   # 10M USDT/gün (50M çok sıkıydı)
+    min_atr_pct:        float = float(os.getenv("MIN_ATR_PCT",        "0.02"))       # min %0.02/bar (0.08 çok sıkıydı)
+    max_atr_pct:        float = float(os.getenv("MAX_ATR_PCT",        "1.50"))       # max %1.50/bar (0.50 çılgın piyasada reddediyordu)
     filter_refresh_hours: int = int(os.getenv("FILTER_REFRESH_HOURS", "6"))          # kaç saatte bir filtre yenilenir
 
     # ── URLs ──────────────────────────────────────────────────

@@ -26,6 +26,8 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%H:%M:%S",
 )
+# Show DEBUG logs for feed so candle closes are visible
+logging.getLogger("apex.feed").setLevel(logging.DEBUG)
 log = logging.getLogger("apex.main")
 
 orchestrator: Orchestrator | None = None

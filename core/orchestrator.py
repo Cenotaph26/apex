@@ -107,8 +107,9 @@ class Orchestrator:
         self.risk.state.starting_balance = balance
         self._log("ok", f"Starting balance: {balance:.2f} USDT (walletBalance)")
 
-        # Warm funding cache after watchlist is resolved by feed.run()
-        await self._funding.prefetch_all(settings.watchlist)
+        # NOTE: prefetch_all is now called INSIDE feed.run() after _resolve_watchlist
+        # so watchlist is guaranteed to be populated before funding cache is warmed.
+        # Do NOT call it here — settings.watchlist may still be ["AUTO"] at this point.
 
         await asyncio.gather(
             asyncio.create_task(self.feed.run()),
@@ -227,6 +228,13 @@ class Orchestrator:
                     signals.append(sig)
                     self._log("info",
                         f"candle closed {sym} score={sig.score:.0f} dir={sig.direction}")
+                else:
+                    # Log why score returned None (helps debug)
+                    buf = self.feed.buffers.get(sym)
+                    buf_len = len(buf) if buf else 0
+                    if buf_len < 30:
+                        self._log("info",
+                            f"candle closed {sym} — warming up ({buf_len}/30 bars)")
 
             if not signals:
                 continue

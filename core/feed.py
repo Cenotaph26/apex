@@ -113,6 +113,9 @@ async def _fetch_filtered_watchlist() -> list[str]:
         if result:
             top5 = [(p[0], f"${p[1]/1e6:.0f}M", f"atr≈{p[2]:.3f}%") for p in passed[:5]]
             log.info("İlk 5 coin: %s", top5)
+        else:
+            log.warning("Filtre sonucu 0 coin — tüm filtreler atlanıyor, varsayılan liste kullanılıyor")
+            return _DEFAULT_WATCHLIST
 
         return result
 
@@ -149,6 +152,15 @@ class FeedManager:
                 self.buffers[sym] = CandleBuffer(maxlen=100)
 
         log.info("Watchlist hazır: %d coin", len(self.watchlist))
+        # Warm funding cache now that watchlist is resolved
+        try:
+            from agents.funding import FundingAgent as _FA
+            _fa = _FA()
+            import asyncio as _asyncio
+            _asyncio.create_task(_fa.prefetch_all(self.watchlist))
+            log.info("Funding cache ön yükleme başlatıldı: %d coin", len(self.watchlist))
+        except Exception as _e:
+            log.warning("Funding prefetch başlatılamadı: %s", _e)
 
     async def _refresh_filter_loop(self):
         """Her FILTER_REFRESH_HOURS saatte bir filtreyi yeniler."""
@@ -248,6 +260,7 @@ class FeedManager:
             buf = self.buffers[sym]
         closed = buf.update(candle)
         if closed:
+            log.debug("Candle closed: %s buf_len=%d", sym, len(buf))
             for cb in self._callbacks:
                 try:
                     cb(sym)
