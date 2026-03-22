@@ -80,23 +80,32 @@ class MomentumSniper:
         resistance = max(c.close for c in lookback)
         support    = min(c.close for c in lookback)
 
-        # ── 3. Price breakout ─────────────────────────────────
+        # ── 3. Price direction & breakout score ──────────────
         margin = self.cfg.momentum_breakout_margin_pct / 100
 
         long_break  = last.close > resistance * (1 + margin)
         short_break = last.close < support   * (1 - margin)
 
-        if not long_break and not short_break:
-            return 0.0, "none"
-
-        direction = "long" if long_break else "short"
-
+        # Direction: breakout > trend (bias toward resistance/support side) > neutral
         if long_break:
+            direction = "long"
             break_pct = (last.close - resistance) / resistance * 100
-        else:
+            breakout_score = min(100.0, break_pct / margin * 30 + 50)
+        elif short_break:
+            direction = "short"
             break_pct = (support - last.close) / support * 100
-
-        breakout_score = min(100.0, break_pct / margin * 30 + 40)
+            breakout_score = min(100.0, break_pct / margin * 30 + 50)
+        else:
+            # No breakout: score based on proximity to resistance/support
+            # Closer to resistance = bullish bias, closer to support = bearish bias
+            mid = (resistance + support) / 2
+            if last.close >= mid:
+                direction = "long"
+                # How close to resistance (0=at mid, 100=above resistance)
+                breakout_score = min(49.0, (last.close - mid) / max(resistance - mid, 1e-10) * 49)
+            else:
+                direction = "short"
+                breakout_score = min(49.0, (mid - last.close) / max(mid - support, 1e-10) * 49)
 
         # ── 4. Volume — SOFT score (was hard-fail) ────────────
         avg_vol = statistics.mean(c.volume for c in candles[-21:-1])

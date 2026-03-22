@@ -31,11 +31,11 @@ from core.models import CandleBuffer
 log = logging.getLogger("apex.coin_filter")
 
 # ── Filtre parametreleri ──────────────────────────────────────────────────────
-MIN_VOLUME_USDT  = 50_000_000    # 24h USDT hacmi ≥ 50M (ATR filtresi kaliteyi sağlar)
-MIN_ATR_PCT      = 0.08          # Son 4 saatlik ATR ≥ %0.08 (BTC~%0.10 geçebilsin)
-MAX_ATR_PCT      = 2.00          # Son 4 saatlik ATR ≤ %2.00 (aşırı volatilite)
+MIN_VOLUME_USDT  = 5_000_000     # 24h USDT hacmi ≥ 5M (100 bar ile tahmin yapılıyor)
+MIN_ATR_PCT      = 0.01          # Son 100 barın ATR ≥ %0.01 (çok geniş)
+MAX_ATR_PCT      = 5.00          # Son 100 barın ATR ≤ %5.00 (çok geniş)
 FILTER_TTL_SEC   = 3600          # Filtre sonuçlarını 1 saat cache'le
-ATR_BARS         = 240           # 4 saat = 240 × 1m bar
+ATR_BARS         = 100           # Mevcut buffer boyutu
 
 
 def _atr_pct(candles: list, n: int = ATR_BARS) -> float:

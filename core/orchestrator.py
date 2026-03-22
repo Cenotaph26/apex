@@ -256,7 +256,8 @@ class Orchestrator:
         # ── Ön filtre: hacim + volatilite ────────────────────────────────────
         tradeable, filter_reason = self._coin_filter.is_tradeable(symbol, buf)
         if not tradeable:
-            return None  # Skor hesaplamaya bile girme
+            log.debug("coin_filter rejected %s: %s", symbol, filter_reason)
+            return None
 
         m_score, direction = self._momentum.score(buf)
         if direction == "none" or m_score == 0:
