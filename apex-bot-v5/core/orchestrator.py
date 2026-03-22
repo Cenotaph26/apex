@@ -34,7 +34,6 @@ from agents.momentum import MomentumSniper
 from agents.orderflow import OrderFlowAgent
 from agents.funding import FundingAgent
 from agents.liquidation import LiquidationHunter
-from core.coin_filter import CoinFilter
 
 log = logging.getLogger("apex.orchestrator")
 
@@ -70,7 +69,6 @@ class Orchestrator:
         self._orderflow   = OrderFlowAgent()
         self._funding     = FundingAgent()
         self._liquidation = LiquidationHunter()
-        self._coin_filter  = CoinFilter()
 
         self._running = False
         self._last_signals: dict[str, CoinSignal] = {}
@@ -244,12 +242,6 @@ class Orchestrator:
         buf = self.feed.buffers.get(symbol)
         if buf is None or len(buf) < 30:
             return None
-
-        # ── Ön filtre: hacim + volatilite ────────────────────────────────────
-        tradeable, filter_reason = self._coin_filter.is_tradeable(symbol, buf)
-        if not tradeable:
-            return None  # Skor hesaplamaya bile girme
-
         m_score, direction = self._momentum.score(buf)
         if direction == "none" or m_score == 0:
             return None
@@ -586,11 +578,6 @@ class Orchestrator:
             "score_threshold":   settings.score_threshold,
             "max_open_positions": settings.max_open_positions,
             "watchlist_count":   len(settings.watchlist),
-            "filter_info":       (
-                f"vol≥{settings.min_volume_usdt/1e6:.0f}M "
-                f"atr:{settings.min_atr_pct:.2f}%-{settings.max_atr_pct:.2f}%"
-            ),
-            "coin_filter_stats": self._coin_filter.stats(),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {

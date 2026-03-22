@@ -74,8 +74,6 @@ async def health():
         "daily_pnl":        orchestrator.daily_pnl(),
         "max_positions":    settings.max_open_positions,
         "score_threshold":  settings.score_threshold,
-        "min_volume_m":    settings.min_volume_usdt / 1_000_000,
-        "atr_filter":      f"{settings.min_atr_pct}%-{settings.max_atr_pct}%",
     }
 
 
@@ -137,7 +135,7 @@ async def set_score_threshold(value: float):
     """Set minimum signal score threshold (50-90). No restart needed."""
     if orchestrator is None:
         return {"error": "not ready"}
-    value = max(60.0, min(85.0, float(value)))
+    value = max(50.0, min(90.0, float(value)))
     settings.score_threshold = value
     log.info("Score threshold set to %.1f", value)
     return {"ok": True, "msg": f"Min skor eşiği: {value:.0f}",

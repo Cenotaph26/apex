@@ -40,7 +40,7 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "75"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "65"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
     loop_interval_sec:  float = float(os.getenv("LOOP_INTERVAL_SEC",  "60"))
     max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "3"))
@@ -68,14 +68,6 @@ class Settings:
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
     atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.0"))
-
-    # ── Watchlist ön filtresi ────────────────────────────────
-    # Binance'tan çekilen tüm coinlere uygulanır.
-    # Sadece ÜÇ koşulu birden sağlayanlar listeye girer.
-    min_volume_usdt:    float = float(os.getenv("MIN_VOLUME_USDT",    "50000000"))   # 50M USDT/gün
-    min_atr_pct:        float = float(os.getenv("MIN_ATR_PCT",        "0.08"))       # min %0.08/bar (çok durgun olmasın)
-    max_atr_pct:        float = float(os.getenv("MAX_ATR_PCT",        "0.50"))       # max %0.50/bar (çok çılgın olmasın)
-    filter_refresh_hours: int = int(os.getenv("FILTER_REFRESH_HOURS", "6"))          # kaç saatte bir filtre yenilenir
 
     # ── URLs ──────────────────────────────────────────────────
     @property

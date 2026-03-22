@@ -333,13 +333,13 @@ body{padding:12px;overflow-y:auto}
       <div class="ctrl-lbl">Min sinyal skoru (eşik)</div>
       <div class="ctrl-row">
         <div class="lev-grid" id="score-grid">
-          <div class="lev-preset" onclick="setScorePreset(68)">68</div>
+          <div class="lev-preset" onclick="setScorePreset(55)">55</div>
+          <div class="lev-preset" onclick="setScorePreset(60)">60</div>
+          <div class="lev-preset active" onclick="setScorePreset(65)">65</div>
           <div class="lev-preset" onclick="setScorePreset(70)">70</div>
-          <div class="lev-preset" onclick="setScorePreset(72)">72</div>
-          <div class="lev-preset active" onclick="setScorePreset(75)">75</div>
-          <div class="lev-preset" onclick="setScorePreset(80)">80</div>
+          <div class="lev-preset" onclick="setScorePreset(75)">75</div>
         </div>
-        <input type="number" class="lev-input" id="score-val" min="60" max="85" value="75">
+        <input type="number" class="lev-input" id="score-val" min="50" max="90" value="65">
         <button class="apply-btn" onclick="applyScore()">Uygula</button>
       </div>
     </div>
@@ -525,15 +525,6 @@ function applyState(d){
   set('rk-up',d.uptime||'—');
   set('rk-lev','x'+(d.global_leverage||1));
   if(d.watchlist_count) set('h-coins', d.watchlist_count);
-  if(d.filter_info){
-    var fi=$('h-filter');
-    if(fi) fi.textContent=d.filter_info;
-  }
-  if(d.coin_filter_stats){
-    var fs=d.coin_filter_stats;
-    var el=document.getElementById('filter-stats');
-    if(el) el.textContent='Filtre: '+fs.passed+' geçti / '+fs.total_checked+' kontrol ('+fs.pass_rate+')';
-  }
   if(d.max_open_positions !== undefined){
     document.getElementById('maxpos-val').value = d.max_open_positions;
     document.querySelectorAll('#maxpos-grid .lev-preset').forEach(function(b){
@@ -543,7 +534,7 @@ function applyState(d){
   if(d.score_threshold !== undefined){
     document.getElementById('score-val').value = d.score_threshold;
     document.querySelectorAll('#score-grid .lev-preset').forEach(function(b){
-      b.classList.toggle('active', parseInt(b.textContent) === Math.round(d.score_threshold || 75));
+      b.classList.toggle('active', parseInt(b.textContent) === Math.round(d.score_threshold));
     });
   }
   var rb=$('risk-badge');
