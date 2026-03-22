@@ -190,9 +190,60 @@ class FeedManager:
             streams.append(f"{s}@bookTicker")
         return f"{settings.ws_base}/stream?streams={'/'.join(streams)}"
 
+    async def _preload_historical(self):
+        """
+        Startup'ta her coin için Binance Futures REST API'den
+        son 100 adet 1m mumu çekip buffer'ı anında doldurur.
+        Böylece WS bağlanır bağlanmaz sinyal üretilebilir.
+        """
+        log.info("Geçmiş veri yükleniyor (%d coin)...", len(self.watchlist))
+        ok = 0
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                for sym in self.watchlist:
+                    if not self._running:
+                        break
+                    try:
+                        r = await client.get(
+                            "https://fapi.binance.com/fapi/v1/klines",
+                            params={
+                                "symbol":   sym,
+                                "interval": "1m",
+                                "limit":    100,
+                            },
+                        )
+                        if not r.is_success:
+                            continue
+                        klines = r.json()
+                        buf = self.buffers.setdefault(sym, CandleBuffer(maxlen=100))
+                        for k in klines:
+                            candle = Candle(
+                                symbol=sym,
+                                open_time=int(k[0]),
+                                open=float(k[1]),
+                                high=float(k[2]),
+                                low=float(k[3]),
+                                close=float(k[4]),
+                                volume=float(k[5]),
+                                close_time=int(k[6]),
+                                is_closed=True,
+                            )
+                            buf._buf.append(candle)
+                        ok += 1
+                    except Exception as e:
+                        log.warning("Geçmiş veri hatası %s: %s", sym, e)
+                    await asyncio.sleep(0.05)  # rate limit koruması
+        except Exception as e:
+            log.warning("Geçmiş veri yükleme başarısız: %s", e)
+        log.info("Geçmiş veri yüklendi: %d/%d coin, her biri 100 bar hazır",
+                 ok, len(self.watchlist))
+
     async def run(self):
         self._running = True
         await self._resolve_watchlist()
+
+        # Geçmiş mumları yükle — WS açılmadan önce buffer'ları doldur
+        await self._preload_historical()
 
         # Filtre yenileme döngüsünü arka planda başlat
         asyncio.create_task(self._refresh_filter_loop())
