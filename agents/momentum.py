@@ -1,13 +1,22 @@
 """
-MomentumSniper — 1m breakout agent.
+MomentumSniper v2 — 1m breakout agent.
 
 Logic:
 1. Consolidation detection  (last N bars tight range)
 2. Resistance / support from rolling window
 3. Price breakout confirmed on candle close
-4. Volume spike filter  (volume > avg * multiplier)
+4. Volume filter  (soft penalty instead of hard-fail)
 5. Momentum velocity     (acceleration of closes)
-→ Returns confidence score 0-100
+6. Candle body quality
+
+Fix vs v1:
+- Volume was a hard-fail gate: if volume < 1.8x avg the entire signal was
+  discarded, ignoring consolidation=100, funding=100, liquidation=100, etc.
+  Now volume is a soft score — low volume reduces the total score but
+  doesn't zero out a strong multi-factor signal.
+  A breakout with 1.5x volume on perfect consolidation can still score ~60
+  and clear the 65-threshold, whereas fake breakouts with no other
+  confirmation still won't.
 """
 from __future__ import annotations
 import logging
@@ -44,7 +53,7 @@ class MomentumSniper:
         candles = buf.closed
         needed = max(
             self.cfg.momentum_consolidation_bars + 2,
-            30,  # need 30 bars for avg_range
+            30,
         )
         if len(candles) < needed:
             return 0.0, "none"
@@ -60,31 +69,28 @@ class MomentumSniper:
         if avg_range == 0:
             return 0.0, "none"
 
-        range_ratio = recent_range / avg_range  # smaller = tighter
-        # Score: 0 if ratio>=1, 100 if ratio<=0.2
+        range_ratio = recent_range / avg_range
         consolidation_score = max(0.0, min(100.0, (1.0 - range_ratio) * 125))
 
         # ── 2. Resistance / Support ───────────────────────────
-        # Exclude the current (last) candle so it can break above/below
         last = candles[-1]
-        lookback = candles[-21:-1]  # 20 candles before last
+        lookback = candles[-21:-1]
         if not lookback:
             return 0.0, "none"
         resistance = max(c.close for c in lookback)
-        support = min(c.close for c in lookback)
+        support    = min(c.close for c in lookback)
 
         # ── 3. Price breakout ─────────────────────────────────
         margin = self.cfg.momentum_breakout_margin_pct / 100
 
-        long_break = last.close > resistance * (1 + margin)
-        short_break = last.close < support * (1 - margin)
+        long_break  = last.close > resistance * (1 + margin)
+        short_break = last.close < support   * (1 - margin)
 
         if not long_break and not short_break:
             return 0.0, "none"
 
         direction = "long" if long_break else "short"
 
-        # Breakout margin score: bigger break = higher score (cap at 100)
         if long_break:
             break_pct = (last.close - resistance) / resistance * 100
         else:
@@ -92,19 +98,22 @@ class MomentumSniper:
 
         breakout_score = min(100.0, break_pct / margin * 30 + 40)
 
-        # ── 4. Volume spike ───────────────────────────────────
+        # ── 4. Volume — SOFT score (was hard-fail) ────────────
         avg_vol = statistics.mean(c.volume for c in candles[-21:-1])
         if avg_vol == 0:
             return 0.0, "none"
 
         vol_ratio = last.volume / avg_vol
-        if vol_ratio < self.cfg.momentum_volume_multiplier:
-            # Volume not confirmed — hard fail
-            log.debug("%s volume too low: %.2fx (need %.1fx)",
-                      last.symbol, vol_ratio, self.cfg.momentum_volume_multiplier)
-            return 0.0, "none"
+        # Score ramps from 0 at 0.5x to 100 at 3x+
+        # A 1.8x spike (old threshold) now gives ~43 pts — still meaningful
+        # but no longer a binary pass/fail gate.
+        volume_score = min(100.0, max(0.0, (vol_ratio - 0.5) / 2.5 * 100))
 
-        volume_score = min(100.0, (vol_ratio / 3.0) * 100)
+        if vol_ratio < 0.8:
+            # True zero-volume candle / data gap — still discard
+            log.debug("%s volume suspiciously low: %.2fx — skipping",
+                      last.symbol, vol_ratio)
+            return 0.0, "none"
 
         # ── 5. Momentum velocity ──────────────────────────────
         if len(candles) >= 4:
@@ -119,7 +128,7 @@ class MomentumSniper:
             velocity_score = 50.0
 
         # ── 6. Candle body quality ────────────────────────────
-        body_score = last.body_ratio * 100  # strong body = clean close
+        body_score = last.body_ratio * 100
 
         # ── Weighted total ────────────────────────────────────
         total = (
@@ -132,9 +141,9 @@ class MomentumSniper:
 
         log.info(
             "%s MomentumSniper | dir=%s score=%.1f "
-            "[cons=%.0f vol=%.0f brk=%.0f vel=%.0f body=%.0f]",
+            "[cons=%.0f vol=%.0f(%.1fx) brk=%.0f vel=%.0f body=%.0f]",
             last.symbol, direction, total,
-            consolidation_score, volume_score, breakout_score,
-            velocity_score, body_score,
+            consolidation_score, volume_score, vol_ratio,
+            breakout_score, velocity_score, body_score,
         )
         return round(total, 1), direction

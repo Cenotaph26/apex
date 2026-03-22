@@ -1,15 +1,15 @@
 """
-Orchestrator v3
+Orchestrator v4
 
-Key fixes & additions:
-1. _sync_positions_loop: every 30s, fetch real positions from exchange
-   → if exchange has no position but bot thinks it does → auto-close in bot state
-   → if exchange has position but bot doesn't know → log warning
-2. After SL/TP hit: cancel_all_orders to clean up orphan orders
-3. Trailing stop after TP1: SL moves to breakeven
-4. API endpoint for leverage control: POST /control/leverage
-5. API endpoint to force-close: POST /control/close/{symbol}
-6. Win/loss tracked from actual P&L sign, not assumptions
+Fixes vs v3:
+1. Double-close guard (_closing set) — monitor_loop and sync_positions_loop
+   can no longer race to close the same position twice.
+2. Unknown-position spam fix — warned symbols are remembered, only logged once.
+3. TP2 qty bug fixed — was closing pos.qty*0.5 of already-halved qty
+   (after TP1 pos.qty is already the remaining half), should close all of it.
+4. _try_open under lock — prevents two candles arriving simultaneously
+   from opening duplicate positions on the same symbol.
+5. MAX_NOTIONAL scales with balance — dynamic cap at 10% of current balance.
 """
 from __future__ import annotations
 import asyncio
@@ -64,6 +64,12 @@ class Orchestrator:
         self._pending_eval: set[str] = set()
         self._lock = asyncio.Lock()
 
+        # Guard against double-close races between monitor and sync loops
+        self._closing: set[str] = set()
+
+        # Remember warned unknown positions to avoid log spam every 30s
+        self._warned_unknown: set[str] = set()
+
         self._logs: deque[LogEntry] = deque(maxlen=MAX_LOG_LINES)
         self._equity_history: deque[dict] = deque(maxlen=MAX_EQUITY_PTS)
         self._wins:   int = 0
@@ -114,7 +120,6 @@ class Orchestrator:
                 if bal > 0:
                     old = self.risk.state.current_balance
                     self.risk.state.current_balance = bal
-                    # Peak is wallet balance — reflects realized gains/losses
                     if bal > self.risk.state.peak_balance:
                         self.risk.state.peak_balance = bal
                     if abs(bal - old) > 0.5:
@@ -133,43 +138,58 @@ class Orchestrator:
 
     async def _sync_positions_loop(self):
         """
-        Every 30s: compare bot's position list with exchange.
-        If exchange shows position closed (qty≈0) → clean up bot state.
-        This fixes the 'position open on exchange after bot restart' problem.
+        Every 30s: compare bot state vs exchange.
+        - Bot has position but exchange doesn't → SL/TP already filled, clean up.
+        - Exchange has position bot doesn't know → warn ONCE per symbol.
         """
-        await asyncio.sleep(35)  # let startup settle
+        await asyncio.sleep(35)
         while self._running:
             try:
                 ex_positions = await self.exec.get_open_positions()
                 ex_symbols = {p["symbol"] for p in ex_positions}
 
-                # Check bot positions that might have been closed on exchange
                 for sym in list(self.risk.state.positions.keys()):
+                    # Skip if monitor_loop is already handling this symbol
+                    if sym in self._closing:
+                        continue
                     if sym not in ex_symbols:
-                        pos = self.risk.state.positions[sym]
-                        buf = self.feed.buffers.get(sym)
-                        cur = pos.entry_price
-                        if buf:
-                            c = buf.live or (buf.closed[-1] if buf.closed else None)
-                            if c:
-                                cur = c.close
-                        pnl = self.risk.close_position(sym, cur, "exchange_sync")
-                        if pnl >= 0:
-                            self._wins += 1
-                        else:
-                            self._losses += 1
-                        await self.exec.cancel_all_orders(sym)
-                        self._log("ok" if pnl >= 0 else "warn",
-                            f"Position synced closed: {sym} pnl={pnl:+.2f} USDT")
+                        self._closing.add(sym)
+                        try:
+                            pos = self.risk.state.positions.get(sym)
+                            if pos is None:
+                                continue
+                            buf = self.feed.buffers.get(sym)
+                            cur = pos.entry_price
+                            if buf:
+                                c = buf.live or (buf.closed[-1] if buf.closed else None)
+                                if c:
+                                    cur = c.close
+                            pnl = self.risk.close_position(sym, cur, "exchange_sync")
+                            if pnl >= 0:
+                                self._wins += 1
+                            else:
+                                self._losses += 1
+                            await self.exec.cancel_all_orders(sym)
+                            self._log("ok" if pnl >= 0 else "warn",
+                                f"Position synced closed: {sym} pnl={pnl:+.2f} USDT")
+                        finally:
+                            self._closing.discard(sym)
 
-                # Warn about exchange positions bot doesn't know about
+                # Warn about unknown exchange positions — only once per symbol
+                current_unknowns: set[str] = set()
                 for ep in ex_positions:
                     sym = ep["symbol"]
                     if sym not in self.risk.state.positions:
-                        amt = float(ep.get("positionAmt", 0))
-                        self._log("warn",
-                            f"Unknown position on exchange: {sym} amt={amt:.4f} "
-                            f"(not tracked by bot — manually opened?)")
+                        current_unknowns.add(sym)
+                        if sym not in self._warned_unknown:
+                            amt = float(ep.get("positionAmt", 0))
+                            self._log("warn",
+                                f"Unknown position on exchange: {sym} amt={amt:.4f} "
+                                f"(not tracked by bot — manually opened?)")
+                            self._warned_unknown.add(sym)
+
+                # Clear warning state when those positions disappear from exchange
+                self._warned_unknown &= current_unknowns
 
             except Exception as e:
                 self._log("warn", f"Position sync failed: {e}")
@@ -205,7 +225,9 @@ class Orchestrator:
                 f"({len(signals)} coins evaluated)")
 
             if winner.score >= settings.score_threshold:
-                await self._try_open(winner)
+                # Under lock: prevents duplicate opens from back-to-back candles
+                async with self._lock:
+                    await self._try_open(winner)
 
     # ── Score ─────────────────────────────────────────────────
     async def _score_coin(self, symbol: str) -> CoinSignal | None:
@@ -252,13 +274,11 @@ class Orchestrator:
         tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
         tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
-        # 1. Set leverage
         await self.exec.set_leverage(sig.symbol, leverage)
 
         entry_side = "BUY" if sig.direction == "long" else "SELL"
         close_side = "SELL" if sig.direction == "long" else "BUY"
 
-        # 2. Entry market order
         result = await self.exec.place_market_order(sig.symbol, entry_side, qty)
         if not result.get("orderId"):
             self._log("warn", f"Entry order failed for {sig.symbol}")
@@ -268,19 +288,16 @@ class Orchestrator:
         avg_price = float(result.get("avgPrice") or entry_price)
         if avg_price > 0:
             entry_price = avg_price
-            # Recalc SL/TP based on actual fill price
-            sl_dist = abs(stop_loss - entry_price)  # keep same distance
+            sl_dist = abs(stop_loss - entry_price)
             stop_loss = (entry_price - sl_dist) if sig.direction == "long" else (entry_price + sl_dist)
             tp1 = entry_price * (1 + pct * settings.tp1_pct / 100)
             tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
             tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
-        # 3. Exchange-side stop-loss (survives bot restart)
         sl_result = await self.exec.place_stop_loss(
             sig.symbol, close_side, qty, stop_loss)
         sl_order_id = str(sl_result.get("orderId", ""))
 
-        # 4. Exchange-side TP1 (50% close)
         _, step, _ = SYMBOL_INFO.get(sig.symbol, (1.0, 1.0, 4))
         tp1_qty = max(_round_step(qty * 0.5, step), step)
         tp1_result = await self.exec.place_take_profit(
@@ -305,6 +322,10 @@ class Orchestrator:
         while self._running:
             await asyncio.sleep(1.0)
             for sym, pos in list(self.risk.state.positions.items()):
+                # Skip symbols already being closed
+                if sym in self._closing:
+                    continue
+
                 buf = self.feed.buffers.get(sym)
                 if buf is None:
                     continue
@@ -328,42 +349,47 @@ class Orchestrator:
                     tp2_hit = price <= pos.tp2 and pos.tp1_hit and not pos.tp2_hit
 
                 if sl_hit:
-                    self._log("warn",
-                        f"SL hit: {sym} @ {price:.4f} — "
-                        f"exchange STOP_MARKET should fill")
-                    # Emergency: ensure position is closed
-                    await self.exec.cancel_all_orders(sym)
-                    await self.exec.place_market_order(sym, close_side, pos.qty, reduce_only=True)
-                    pnl = self.risk.close_position(sym, price, "SL")
-                    self._losses += 1
-                    self._log("warn", f"Closed {sym} SL pnl={pnl:+.2f} USDT")
+                    self._closing.add(sym)
+                    try:
+                        self._log("warn", f"SL hit: {sym} @ {price:.4f} — closing position")
+                        await self.exec.cancel_all_orders(sym)
+                        await self.exec.place_market_order(sym, close_side, pos.qty, reduce_only=True)
+                        pnl = self.risk.close_position(sym, price, "SL")
+                        self._losses += 1
+                        self._log("warn", f"Closed {sym} SL pnl={pnl:+.2f} USDT")
+                    finally:
+                        self._closing.discard(sym)
 
                 elif tp1_hit:
                     pos.tp1_hit = True
-                    self._log("ok", f"TP1 hit: {sym} @ {price:.4f} — 50% filled by exchange")
-                    # Move SL to breakeven
+                    self._log("ok", f"TP1 hit: {sym} @ {price:.4f} — 50% closed")
                     if pos.sl_order_id:
                         await self.exec.cancel_order(sym, pos.sl_order_id)
+                    # Update qty to remaining half before placing new SL
                     remaining = max(_round_step(pos.qty * 0.5, step), step)
+                    pos.qty = remaining
                     sl_r = await self.exec.place_stop_loss(
                         sym, close_side, remaining, pos.entry_price)
                     pos.sl_order_id = str(sl_r.get("orderId", ""))
-                    pos.qty = remaining
                     self._log("ok", f"SL moved to breakeven: {sym} @ {pos.entry_price:.4f}")
 
                 elif tp2_hit:
-                    pos.tp2_hit = True
-                    self._log("ok", f"TP2 hit: {sym} @ {price:.4f} — closing rest")
-                    remaining = max(_round_step(pos.qty * 0.5, step), step)
-                    await self.exec.cancel_all_orders(sym)
-                    await self.exec.place_market_order(sym, close_side, remaining, reduce_only=True)
-                    pnl = self.risk.close_position(sym, price, "TP2")
-                    self._wins += 1
-                    self._log("ok", f"Closed {sym} TP2 pnl={pnl:+.2f} USDT")
+                    self._closing.add(sym)
+                    try:
+                        pos.tp2_hit = True
+                        self._log("ok", f"TP2 hit: {sym} @ {price:.4f} — closing rest")
+                        # pos.qty is already the remaining half (set at TP1)
+                        # close ALL of it — do NOT halve again
+                        await self.exec.cancel_all_orders(sym)
+                        await self.exec.place_market_order(sym, close_side, pos.qty, reduce_only=True)
+                        pnl = self.risk.close_position(sym, price, "TP2")
+                        self._wins += 1
+                        self._log("ok", f"Closed {sym} TP2 pnl={pnl:+.2f} USDT")
+                    finally:
+                        self._closing.discard(sym)
 
-    # ── Control API (called from FastAPI routes) ──────────────
+    # ── Control API ───────────────────────────────────────────
     async def set_leverage(self, symbol: str | None, leverage: int) -> str:
-        """Set leverage for one symbol or all symbols."""
         if symbol:
             self.risk.set_leverage(symbol, leverage)
             await self.exec.set_leverage(symbol, leverage)
@@ -375,23 +401,28 @@ class Orchestrator:
             return f"Global leverage set: x{leverage}"
 
     async def force_close(self, symbol: str) -> str:
-        """Force-close a position immediately."""
         pos = self.risk.state.positions.get(symbol)
         if not pos:
             return f"No position found for {symbol}"
-        close_side = "SELL" if pos.direction == "long" else "BUY"
-        buf = self.feed.buffers.get(symbol)
-        cur = pos.entry_price
-        if buf:
-            c = buf.live or (buf.closed[-1] if buf.closed else None)
-            if c:
-                cur = c.close
-        await self.exec.cancel_all_orders(symbol)
-        await self.exec.place_market_order(symbol, close_side, pos.qty, reduce_only=True)
-        pnl = self.risk.close_position(symbol, cur, "force_close")
-        msg = f"Force closed {symbol} pnl={pnl:+.2f} USDT"
-        self._log("ok" if pnl >= 0 else "warn", msg)
-        return msg
+        if symbol in self._closing:
+            return f"{symbol} is already being closed"
+        self._closing.add(symbol)
+        try:
+            close_side = "SELL" if pos.direction == "long" else "BUY"
+            buf = self.feed.buffers.get(symbol)
+            cur = pos.entry_price
+            if buf:
+                c = buf.live or (buf.closed[-1] if buf.closed else None)
+                if c:
+                    cur = c.close
+            await self.exec.cancel_all_orders(symbol)
+            await self.exec.place_market_order(symbol, close_side, pos.qty, reduce_only=True)
+            pnl = self.risk.close_position(symbol, cur, "force_close")
+            msg = f"Force closed {symbol} pnl={pnl:+.2f} USDT"
+            self._log("ok" if pnl >= 0 else "warn", msg)
+            return msg
+        finally:
+            self._closing.discard(symbol)
 
     # ── Status ────────────────────────────────────────────────
     def position_count(self) -> int:

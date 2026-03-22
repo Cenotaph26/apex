@@ -1,8 +1,12 @@
 """
-Risk Manager v3
-- Position sizing capped by MAX_NOTIONAL_USDT and stepSize
-- Correct SL direction for both long and short
-- Leverage stored per symbol
+Risk Manager v4
+
+Fixes vs v3:
+1. MAX_NOTIONAL is now dynamic — capped at 10% of current balance per trade.
+   Previously hardcoded to 500 USDT regardless of account size.
+2. position_size() receives current_balance at call time — no stale reference.
+3. close_position comment clarified (local update is temporary, overridden by
+   _balance_loop every 30s with real walletBalance from exchange).
 """
 from __future__ import annotations
 import logging
@@ -29,7 +33,10 @@ SYMBOL_INFO: dict[str, tuple[float, float, int]] = {
     "INJUSDT":   (0.1,   0.1,   3), "SUIUSDT":   (1.0,   1.0,   5),
 }
 
-MAX_NOTIONAL_USDT = 500.0  # max position size in USDT
+# Max position size as a fraction of account balance.
+# e.g. 0.10 → never risk more than 10% of balance as notional per trade.
+# Replaces the old hardcoded 500 USDT cap which didn't scale with account size.
+MAX_NOTIONAL_PCT = 0.10
 
 
 def _round_step(value: float, step: float) -> float:
@@ -105,7 +112,6 @@ class RiskManager:
             current_balance=initial_balance,
             peak_balance=initial_balance,
         )
-        # Per-symbol leverage settings (overridable from dashboard)
         self.leverage_map: dict[str, int] = {}
 
     def get_leverage(self, symbol: str) -> int:
@@ -129,7 +135,7 @@ class RiskManager:
         if len(self.state.positions) >= settings.max_open_positions:
             return False, f"max positions reached ({settings.max_open_positions})"
         if self.state.drawdown_pct >= settings.max_drawdown_pct:
-            return False, f"drawdown {self.state.drawdown_pct:.1f}% ≥ {settings.max_drawdown_pct}%"
+            return False, f"drawdown {self.state.drawdown_pct:.1f}% >= {settings.max_drawdown_pct}%"
         open_risk = len(self.state.positions) * settings.risk_per_trade_pct
         if open_risk + settings.risk_per_trade_pct > settings.max_portfolio_risk_pct:
             return False, "portfolio risk cap reached"
@@ -167,15 +173,18 @@ class RiskManager:
 
         risk_usdt = self.state.current_balance * settings.risk_per_trade_pct / 100
         qty_risk  = (risk_usdt * leverage) / sl_distance
-        qty_cap   = (MAX_NOTIONAL_USDT * leverage) / entry_price
+
+        # Dynamic notional cap: scales with account size (replaces hardcoded 500 USDT)
+        max_notional = self.state.current_balance * MAX_NOTIONAL_PCT
+        qty_cap = (max_notional * leverage) / entry_price
 
         qty = _round_step(min(qty_risk, qty_cap), step_size)
         qty = max(qty, min_qty)
 
         log.info("Position size %s: entry=%.4f sl_dist=%.5f lev=x%d "
-                 "qty=%.4f notional=%.2f USDT",
+                 "qty=%.4f notional=%.2f USDT (cap=%.2f)",
                  symbol, entry_price, sl_distance, leverage,
-                 qty, qty * entry_price / leverage)
+                 qty, qty * entry_price / leverage, max_notional)
 
         return qty, round(stop_loss, 8), round(tp1, 8)
 
@@ -195,10 +204,8 @@ class RiskManager:
         else:
             pnl = (pos.entry_price - exit_price) * pos.qty / pos.leverage
         self.state.closed_pnl += pnl
-        # NOTE: current_balance is authoritatively synced from exchange
-        # walletBalance every 30s via _balance_loop. We update locally
-        # here so the dashboard reflects the change immediately, but the
-        # next balance loop will overwrite with the real value.
+        # Local update for immediate dashboard feedback.
+        # _balance_loop will overwrite with real walletBalance within 30s.
         self.state.current_balance += pnl
         if self.state.current_balance > self.state.peak_balance:
             self.state.peak_balance = self.state.current_balance
