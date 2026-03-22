@@ -313,6 +313,40 @@ body{padding:12px;overflow-y:auto}
     <div class="ctrl-divider"></div>
 
     <div class="ctrl-section">
+      <div class="ctrl-lbl">Maksimum pozisyon sayısı</div>
+      <div class="ctrl-row">
+        <div class="lev-grid" id="maxpos-grid">
+          <div class="lev-preset" onclick="setMaxPos(1)">1</div>
+          <div class="lev-preset" onclick="setMaxPos(2)">2</div>
+          <div class="lev-preset active" onclick="setMaxPos(3)">3</div>
+          <div class="lev-preset" onclick="setMaxPos(5)">5</div>
+          <div class="lev-preset" onclick="setMaxPos(10)">10</div>
+        </div>
+        <input type="number" class="lev-input" id="maxpos-val" min="1" max="10" value="3">
+        <button class="apply-btn" onclick="applyMaxPos()">Uygula</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Min sinyal skoru (eşik)</div>
+      <div class="ctrl-row">
+        <div class="lev-grid" id="score-grid">
+          <div class="lev-preset" onclick="setScorePreset(55)">55</div>
+          <div class="lev-preset" onclick="setScorePreset(60)">60</div>
+          <div class="lev-preset active" onclick="setScorePreset(65)">65</div>
+          <div class="lev-preset" onclick="setScorePreset(70)">70</div>
+          <div class="lev-preset" onclick="setScorePreset(75)">75</div>
+        </div>
+        <input type="number" class="lev-input" id="score-val" min="50" max="90" value="65">
+        <button class="apply-btn" onclick="applyScore()">Uygula</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
       <div class="ctrl-lbl">Bot kontrolü</div>
       <div class="pause-row">
         <button class="pause-btn" id="btn-pause" onclick="pauseBot()">⏸ Durdur</button>
@@ -490,6 +524,19 @@ function applyState(d){
   set('rk-wl',(d.wins||0)+' / '+(d.losses||0));
   set('rk-up',d.uptime||'—');
   set('rk-lev','x'+(d.global_leverage||1));
+  if(d.watchlist_count) set('h-coins', d.watchlist_count);
+  if(d.max_open_positions !== undefined){
+    document.getElementById('maxpos-val').value = d.max_open_positions;
+    document.querySelectorAll('#maxpos-grid .lev-preset').forEach(function(b){
+      b.classList.toggle('active', parseInt(b.textContent) === d.max_open_positions);
+    });
+  }
+  if(d.score_threshold !== undefined){
+    document.getElementById('score-val').value = d.score_threshold;
+    document.querySelectorAll('#score-grid .lev-preset').forEach(function(b){
+      b.classList.toggle('active', parseInt(b.textContent) === Math.round(d.score_threshold));
+    });
+  }
   var rb=$('risk-badge');
   if(rb){rb.textContent=dd>=8?'HALTED':dd>=5?'WARNING':'HEALTHY';rb.className=dd>=8?'badge bred':dd>=5?'badge byel':'badge bgr';}
   renderLogs(d.logs||[]);
@@ -552,6 +599,30 @@ async function forceClose(){
   var sym=$('close-sym').value;
   if(!sym){feedback('Coin seçin',false);return;}
   await forceCloseSymbol(sym);
+}
+
+async function setMaxPos(v){
+  document.getElementById('maxpos-val').value=v;
+  document.querySelectorAll('#maxpos-grid .lev-preset').forEach(function(b){b.classList.toggle('active',parseInt(b.textContent)===v);});
+}
+async function applyMaxPos(){
+  var v=parseInt(document.getElementById('maxpos-val').value)||3;
+  try{
+    var r=await fetch('/control/max_positions?value='+v,{method:'POST'});
+    var d=await r.json(); feedback(d.msg||'OK',d.ok);
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function setScorePreset(v){
+  document.getElementById('score-val').value=v;
+  document.querySelectorAll('#score-grid .lev-preset').forEach(function(b){b.classList.toggle('active',parseInt(b.textContent)===v);});
+}
+async function applyScore(){
+  var v=parseFloat(document.getElementById('score-val').value)||65;
+  try{
+    var r=await fetch('/control/score?value='+v,{method:'POST'});
+    var d=await r.json(); feedback(d.msg||'OK',d.ok);
+  }catch(e){feedback('Hata: '+e,false);}
 }
 
 async function pauseBot(){

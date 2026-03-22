@@ -1,10 +1,10 @@
 """
-APEX — entry point.
-Starts the orchestrator and serves:
-  GET /          → dashboard UI
-  GET /health    → JSON health check
-  GET /state     → full snapshot (JSON, polled)
-  GET /stream    → Server-Sent Events — dashboard subscribes here
+APEX — entry point v5
+
+New endpoints:
+  POST /control/max_positions?value=N  — set max open positions (1-10)
+  POST /control/score?value=N          — set min signal score (50-90)
+  GET  /state                          — includes watchlist_count
 """
 from __future__ import annotations
 import asyncio
@@ -34,18 +34,13 @@ orchestrator: Orchestrator | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global orchestrator
-    log.info("🚀 APEX starting — exchange=%s testnet=%s",
+    log.info("APEX starting — exchange=%s testnet=%s",
              settings.exchange.upper(), settings.testnet)
     orchestrator = Orchestrator()
-
-    # Warm funding cache in parallel before first candle close
     await orchestrator._funding.prefetch_all(settings.watchlist)
-
     task = asyncio.create_task(orchestrator.run())
-
     yield
-
-    log.info("🛑 Shutting down...")
+    log.info("Shutting down...")
     orchestrator.stop()
     task.cancel()
     try:
@@ -71,12 +66,14 @@ async def health():
     if orchestrator is None:
         return {"status": "starting"}
     return {
-        "status":         "ok",
-        "exchange":       settings.exchange,
-        "testnet":        settings.testnet,
-        "active_coins":   len(settings.watchlist),
-        "open_positions": orchestrator.position_count(),
-        "daily_pnl":      orchestrator.daily_pnl(),
+        "status":           "ok",
+        "exchange":         settings.exchange,
+        "testnet":          settings.testnet,
+        "active_coins":     len(settings.watchlist),
+        "open_positions":   orchestrator.position_count(),
+        "daily_pnl":        orchestrator.daily_pnl(),
+        "max_positions":    settings.max_open_positions,
+        "score_threshold":  settings.score_threshold,
     }
 
 
@@ -86,6 +83,8 @@ async def state():
         return {}
     return orchestrator.snapshot()
 
+
+# ── Control endpoints ─────────────────────────────────────────────────────────
 
 @app.post("/control/leverage")
 async def set_leverage(symbol: str | None = None, leverage: int = 1):
@@ -108,7 +107,7 @@ async def pause():
     if orchestrator is None:
         return {"error": "not ready"}
     orchestrator._running = False
-    return {"ok": True, "msg": "Bot paused — no new positions will open"}
+    return {"ok": True, "msg": "Bot duraklatıldı — yeni pozisyon açılmaz"}
 
 
 @app.post("/control/resume")
@@ -116,22 +115,39 @@ async def resume():
     if orchestrator is None:
         return {"error": "not ready"}
     orchestrator._running = True
-    return {"ok": True, "msg": "Bot resumed"}
+    return {"ok": True, "msg": "Bot devam ediyor"}
+
+
+@app.post("/control/max_positions")
+async def set_max_positions(value: int):
+    """Set maximum concurrent open positions (1-10). No restart needed."""
+    if orchestrator is None:
+        return {"error": "not ready"}
+    value = max(1, min(10, value))
+    settings.max_open_positions = value
+    log.info("Max open positions set to %d", value)
+    return {"ok": True, "msg": f"Maksimum pozisyon sayısı: {value}",
+            "max_positions": value}
+
+
+@app.post("/control/score")
+async def set_score_threshold(value: float):
+    """Set minimum signal score threshold (50-90). No restart needed."""
+    if orchestrator is None:
+        return {"error": "not ready"}
+    value = max(50.0, min(90.0, float(value)))
+    settings.score_threshold = value
+    log.info("Score threshold set to %.1f", value)
+    return {"ok": True, "msg": f"Min skor eşiği: {value:.0f}",
+            "score_threshold": value}
 
 
 @app.get("/stream")
 async def stream(request: Request):
-    """
-    Server-Sent Events — pushes a full snapshot every second.
-    Dashboard connects once and receives live updates.
-    Generator is properly cancelled when the client disconnects.
-    """
     async def event_generator():
         try:
             while True:
-                # Check if client has disconnected
                 if await request.is_disconnected():
-                    log.debug("SSE client disconnected")
                     break
                 try:
                     if orchestrator is not None:
@@ -142,9 +158,7 @@ async def stream(request: Request):
                 except Exception as e:
                     log.warning("SSE snapshot error: %s", e)
                 await asyncio.sleep(1.0)
-        except asyncio.CancelledError:
-            pass
-        except GeneratorExit:
+        except (asyncio.CancelledError, GeneratorExit):
             pass
 
     return StreamingResponse(

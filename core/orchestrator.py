@@ -105,6 +105,9 @@ class Orchestrator:
         self.risk.state.starting_balance = balance
         self._log("ok", f"Starting balance: {balance:.2f} USDT (walletBalance)")
 
+        # Warm funding cache after watchlist is resolved by feed.run()
+        await self._funding.prefetch_all(settings.watchlist)
+
         await asyncio.gather(
             asyncio.create_task(self.feed.run()),
             asyncio.create_task(self._eval_loop()),
@@ -571,7 +574,10 @@ class Orchestrator:
             "live_prices":    self._live_prices(),
             "equity_history": list(self._equity_history),
             "leverage_map":   {k: v for k, v in self.risk.leverage_map.items()},
-            "global_leverage": settings.default_leverage,
+            "global_leverage":   settings.default_leverage,
+            "score_threshold":   settings.score_threshold,
+            "max_open_positions": settings.max_open_positions,
+            "watchlist_count":   len(settings.watchlist),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {
