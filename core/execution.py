@@ -8,6 +8,7 @@ Key improvements:
 - Detailed logging of every order response
 """
 from __future__ import annotations
+import asyncio
 import hashlib
 import hmac as _hmac
 import logging
@@ -101,19 +102,28 @@ class ExecutionEngine:
 
     # ── Balance ───────────────────────────────────────────────
     async def get_balance(self) -> float:
+        """
+        Returns walletBalance (total equity) — NOT availableBalance.
+
+        availableBalance drops when positions are open (margin is reserved),
+        which would falsely trigger the drawdown circuit breaker.
+        walletBalance = deposits + realized PnL (real account value).
+        Unrealized PnL is tracked separately by the risk manager.
+        """
         if self._dry_run:
             return 1000.0
         try:
             if settings.is_futures_demo:
                 data = await self._get("/fapi/v2/balance")
-                non_zero = [f"{a['asset']}={float(a.get('availableBalance',0)):.2f}"
-                            for a in data if float(a.get('availableBalance',0)) > 0]
-                log.info("Futures Demo balances: %s", ", ".join(non_zero))
                 for a in data:
                     if a.get("asset") == "USDT":
-                        bal = float(a.get("availableBalance", 0))
-                        log.info("Futures Demo USDT balance: %.2f", bal)
-                        return bal
+                        wallet_bal = float(a.get("walletBalance", 0))
+                        avail_bal  = float(a.get("availableBalance", 0))
+                        log.info(
+                            "Futures USDT — wallet: %.2f  available: %.2f",
+                            wallet_bal, avail_bal,
+                        )
+                        return wallet_bal
             else:
                 data = await self._get("/api/v3/account")
                 for a in data.get("balances", []):
@@ -269,6 +279,3 @@ class ExecutionEngine:
 
     async def close(self):
         await self._client.aclose()
-
-
-import asyncio  # needed for emergency_close

@@ -195,6 +195,10 @@ class RiskManager:
         else:
             pnl = (pos.entry_price - exit_price) * pos.qty / pos.leverage
         self.state.closed_pnl += pnl
+        # NOTE: current_balance is authoritatively synced from exchange
+        # walletBalance every 30s via _balance_loop. We update locally
+        # here so the dashboard reflects the change immediately, but the
+        # next balance loop will overwrite with the real value.
         self.state.current_balance += pnl
         if self.state.current_balance > self.state.peak_balance:
             self.state.peak_balance = self.state.current_balance

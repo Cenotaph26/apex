@@ -87,7 +87,7 @@ class Orchestrator:
         self.risk.state.current_balance  = balance
         self.risk.state.peak_balance     = balance
         self.risk.state.starting_balance = balance
-        self._log("ok", f"Starting balance: {balance:.2f} USDT")
+        self._log("ok", f"Starting balance: {balance:.2f} USDT (walletBalance)")
 
         await asyncio.gather(
             asyncio.create_task(self.feed.run()),
@@ -114,6 +114,7 @@ class Orchestrator:
                 if bal > 0:
                     old = self.risk.state.current_balance
                     self.risk.state.current_balance = bal
+                    # Peak is wallet balance — reflects realized gains/losses
                     if bal > self.risk.state.peak_balance:
                         self.risk.state.peak_balance = bal
                     if abs(bal - old) > 0.5:
