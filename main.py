@@ -14,7 +14,7 @@ import os
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -37,6 +37,10 @@ async def lifespan(app: FastAPI):
     log.info("🚀 APEX starting — exchange=%s testnet=%s",
              settings.exchange.upper(), settings.testnet)
     orchestrator = Orchestrator()
+
+    # Warm funding cache in parallel before first candle close
+    await orchestrator._funding.prefetch_all(settings.watchlist)
+
     task = asyncio.create_task(orchestrator.run())
 
     yield
@@ -67,12 +71,12 @@ async def health():
     if orchestrator is None:
         return {"status": "starting"}
     return {
-        "status":          "ok",
-        "exchange":        settings.exchange,
-        "testnet":         settings.testnet,
-        "active_coins":    len(settings.watchlist),
-        "open_positions":  orchestrator.position_count(),
-        "daily_pnl":       orchestrator.daily_pnl(),
+        "status":         "ok",
+        "exchange":       settings.exchange,
+        "testnet":        settings.testnet,
+        "active_coins":   len(settings.watchlist),
+        "open_positions": orchestrator.position_count(),
+        "daily_pnl":      orchestrator.daily_pnl(),
     }
 
 
@@ -116,32 +120,39 @@ async def resume():
 
 
 @app.get("/stream")
-async def stream():
+async def stream(request: Request):
     """
     Server-Sent Events — pushes a full snapshot every second.
     Dashboard connects once and receives live updates.
+    Generator is properly cancelled when the client disconnects.
     """
     async def event_generator():
-        while True:
-            try:
-                if orchestrator is not None:
-                    data = json.dumps(orchestrator.snapshot())
-                    yield f"data: {data}\n\n"
-                else:
-                    yield "data: {}\n\n"
+        try:
+            while True:
+                # Check if client has disconnected
+                if await request.is_disconnected():
+                    log.debug("SSE client disconnected")
+                    break
+                try:
+                    if orchestrator is not None:
+                        data = json.dumps(orchestrator.snapshot())
+                        yield f"data: {data}\n\n"
+                    else:
+                        yield "data: {}\n\n"
+                except Exception as e:
+                    log.warning("SSE snapshot error: %s", e)
                 await asyncio.sleep(1.0)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.warning("SSE error: %s", e)
-                break
+        except asyncio.CancelledError:
+            pass
+        except GeneratorExit:
+            pass
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control":               "no-cache",
-            "X-Accel-Buffering":           "no",    # disable nginx buffering
+            "X-Accel-Buffering":           "no",
             "Access-Control-Allow-Origin": "*",
         },
     )

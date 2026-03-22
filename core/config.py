@@ -58,7 +58,8 @@ class Settings:
     # ── MomentumSniper ────────────────────────────────────────
     momentum_consolidation_bars:  int   = int(os.getenv("MOMENTUM_CONSOLIDATION_BARS", "10"))
     momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT", "0.15"))
-    momentum_volume_multiplier:   float = float(os.getenv("MOMENTUM_VOLUME_MULTIPLIER", "1.8"))
+    # Note: momentum_volume_multiplier removed — volume is now a soft score
+    # (0-100) rather than a hard pass/fail gate. See agents/momentum.py.
 
     # ── TP / SL ───────────────────────────────────────────────
     tp1_pct:           float = float(os.getenv("TP1_PCT", "0.8"))

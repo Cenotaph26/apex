@@ -1,15 +1,14 @@
 """
-Orchestrator v4
+Orchestrator v5
 
-Fixes vs v3:
-1. Double-close guard (_closing set) — monitor_loop and sync_positions_loop
-   can no longer race to close the same position twice.
-2. Unknown-position spam fix — warned symbols are remembered, only logged once.
-3. TP2 qty bug fixed — was closing pos.qty*0.5 of already-halved qty
-   (after TP1 pos.qty is already the remaining half), should close all of it.
-4. _try_open under lock — prevents two candles arriving simultaneously
-   from opening duplicate positions on the same symbol.
-5. MAX_NOTIONAL scales with balance — dynamic cap at 10% of current balance.
+Fixes vs v4:
+1. Lock deadlock risk removed — _try_open no longer called inside lock.
+   Duplicate-open prevention is now handled by checking positions dict
+   and using _opening set, not a blanket lock over async HTTP calls.
+2. Global leverage now parallel — asyncio.gather instead of 20 serial awaits.
+3. snapshot() exposes total_equity and unrealized_pnl for dashboard.
+4. SSE generator properly detects client disconnect via GeneratorExit.
+5. Balance loop updates peak with total_equity (wallet + unrealized).
 """
 from __future__ import annotations
 import asyncio
@@ -62,12 +61,18 @@ class Orchestrator:
         self._running = False
         self._last_signals: dict[str, CoinSignal] = {}
         self._pending_eval: set[str] = set()
-        self._lock = asyncio.Lock()
 
-        # Guard against double-close races between monitor and sync loops
+        # Separate locks for distinct concerns — no nested locking
+        self._eval_lock   = asyncio.Lock()  # serializes candle batch processing
+        self._open_lock   = asyncio.Lock()  # serializes position opens
+
+        # Guards against double-close races (monitor vs sync loop)
         self._closing: set[str] = set()
 
-        # Remember warned unknown positions to avoid log spam every 30s
+        # Symbols currently being opened (prevents duplicate opens)
+        self._opening: set[str] = set()
+
+        # Remembered unknown exchange positions — warn once only
         self._warned_unknown: set[str] = set()
 
         self._logs: deque[LogEntry] = deque(maxlen=MAX_LOG_LINES)
@@ -120,10 +125,13 @@ class Orchestrator:
                 if bal > 0:
                     old = self.risk.state.current_balance
                     self.risk.state.current_balance = bal
-                    if bal > self.risk.state.peak_balance:
-                        self.risk.state.peak_balance = bal
+                    # Peak should reflect total equity (wallet + unrealized)
+                    equity = self.risk.state.total_equity
+                    if equity > self.risk.state.peak_balance:
+                        self.risk.state.peak_balance = equity
                     if abs(bal - old) > 0.5:
-                        self._log("ok", f"Balance synced: {bal:.2f} USDT")
+                        self._log("ok", f"Balance synced: {bal:.2f} USDT "
+                                        f"(equity={equity:.2f})")
             except Exception as e:
                 self._log("warn", f"Balance sync failed: {e}")
             await asyncio.sleep(30)
@@ -133,13 +141,13 @@ class Orchestrator:
             await asyncio.sleep(60)
             self._equity_history.append({
                 "ts":      datetime.now(timezone.utc).strftime("%H:%M"),
-                "balance": round(self.risk.state.current_balance, 2),
+                "balance": round(self.risk.state.total_equity, 2),
             })
 
     async def _sync_positions_loop(self):
         """
         Every 30s: compare bot state vs exchange.
-        - Bot has position but exchange doesn't → SL/TP already filled, clean up.
+        - Bot has position, exchange doesn't → SL/TP filled externally, clean up.
         - Exchange has position bot doesn't know → warn ONCE per symbol.
         """
         await asyncio.sleep(35)
@@ -149,8 +157,7 @@ class Orchestrator:
                 ex_symbols = {p["symbol"] for p in ex_positions}
 
                 for sym in list(self.risk.state.positions.keys()):
-                    # Skip if monitor_loop is already handling this symbol
-                    if sym in self._closing:
+                    if sym in self._closing or sym in self._opening:
                         continue
                     if sym not in ex_symbols:
                         self._closing.add(sym)
@@ -171,7 +178,7 @@ class Orchestrator:
                                 self._losses += 1
                             await self.exec.cancel_all_orders(sym)
                             self._log("ok" if pnl >= 0 else "warn",
-                                f"Position synced closed: {sym} pnl={pnl:+.2f} USDT")
+                                f"Position synced closed: {sym} pnl={pnl:+.4f} USDT")
                         finally:
                             self._closing.discard(sym)
 
@@ -187,8 +194,7 @@ class Orchestrator:
                                 f"Unknown position on exchange: {sym} amt={amt:.4f} "
                                 f"(not tracked by bot — manually opened?)")
                             self._warned_unknown.add(sym)
-
-                # Clear warning state when those positions disappear from exchange
+                # Clear when position is gone
                 self._warned_unknown &= current_unknowns
 
             except Exception as e:
@@ -203,10 +209,12 @@ class Orchestrator:
             if not self._pending_eval:
                 continue
 
-            async with self._lock:
+            # Drain pending set under short lock
+            async with self._eval_lock:
                 batch = self._pending_eval.copy()
                 self._pending_eval.clear()
 
+            # Score all coins — funding HTTP calls happen here
             signals: list[CoinSignal] = []
             for sym in batch:
                 sig = await self._score_coin(sym)
@@ -225,9 +233,7 @@ class Orchestrator:
                 f"({len(signals)} coins evaluated)")
 
             if winner.score >= settings.score_threshold:
-                # Under lock: prevents duplicate opens from back-to-back candles
-                async with self._lock:
-                    await self._try_open(winner)
+                await self._try_open(winner)
 
     # ── Score ─────────────────────────────────────────────────
     async def _score_coin(self, symbol: str) -> CoinSignal | None:
@@ -251,78 +257,95 @@ class Orchestrator:
 
     # ── Open position ─────────────────────────────────────────
     async def _try_open(self, sig: CoinSignal):
-        ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers)
-        if not ok:
-            self._log("info", f"trade blocked [{sig.symbol}]: {reason}")
+        # Fast pre-check before acquiring lock
+        if sig.symbol in self._opening or sig.symbol in self.risk.state.positions:
             return
 
-        buf = self.feed.buffers[sig.symbol]
-        if not buf.closed:
-            return
+        # Serialize opens with a dedicated lock (no HTTP inside eval_lock)
+        async with self._open_lock:
+            # Re-check inside lock — another task may have opened between pre-check and here
+            if sig.symbol in self._opening or sig.symbol in self.risk.state.positions:
+                return
 
-        entry_price = buf.closed[-1].close
-        leverage    = self.risk.get_leverage(sig.symbol)
+            ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers)
+            if not ok:
+                self._log("info", f"trade blocked [{sig.symbol}]: {reason}")
+                return
 
-        qty, stop_loss, tp1 = self.risk.position_size(
-            sig.symbol, entry_price, sig.direction, buf)
+            self._opening.add(sig.symbol)
 
-        if qty <= 0:
-            self._log("warn", f"qty=0 for {sig.symbol}, skip")
-            return
+        # HTTP calls happen OUTSIDE the lock to avoid blocking other opens
+        try:
+            buf = self.feed.buffers.get(sig.symbol)
+            if not buf or not buf.closed:
+                return
 
-        pct = -1 if sig.direction == "short" else 1
-        tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
-        tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
+            entry_price = buf.closed[-1].close
+            leverage    = self.risk.get_leverage(sig.symbol)
 
-        await self.exec.set_leverage(sig.symbol, leverage)
+            qty, stop_loss, tp1 = self.risk.position_size(
+                sig.symbol, entry_price, sig.direction, buf)
 
-        entry_side = "BUY" if sig.direction == "long" else "SELL"
-        close_side = "SELL" if sig.direction == "long" else "BUY"
+            if qty <= 0:
+                self._log("warn", f"qty=0 for {sig.symbol}, skip")
+                return
 
-        result = await self.exec.place_market_order(sig.symbol, entry_side, qty)
-        if not result.get("orderId"):
-            self._log("warn", f"Entry order failed for {sig.symbol}")
-            return
-
-        order_id  = str(result.get("orderId", ""))
-        avg_price = float(result.get("avgPrice") or entry_price)
-        if avg_price > 0:
-            entry_price = avg_price
-            sl_dist = abs(stop_loss - entry_price)
-            stop_loss = (entry_price - sl_dist) if sig.direction == "long" else (entry_price + sl_dist)
-            tp1 = entry_price * (1 + pct * settings.tp1_pct / 100)
+            pct = -1 if sig.direction == "short" else 1
             tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
             tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
-        sl_result = await self.exec.place_stop_loss(
-            sig.symbol, close_side, qty, stop_loss)
-        sl_order_id = str(sl_result.get("orderId", ""))
+            await self.exec.set_leverage(sig.symbol, leverage)
 
-        _, step, _ = SYMBOL_INFO.get(sig.symbol, (1.0, 1.0, 4))
-        tp1_qty = max(_round_step(qty * 0.5, step), step)
-        tp1_result = await self.exec.place_take_profit(
-            sig.symbol, close_side, tp1_qty, tp1)
-        tp1_order_id = str(tp1_result.get("orderId", ""))
+            entry_side = "BUY" if sig.direction == "long" else "SELL"
+            close_side = "SELL" if sig.direction == "long" else "BUY"
 
-        pos = Position(
-            symbol=sig.symbol, direction=sig.direction,
-            entry_price=entry_price, qty=qty,
-            stop_loss=stop_loss, tp1=tp1, tp2=tp2, tp3=tp3,
-            leverage=leverage,
-            order_id=order_id, sl_order_id=sl_order_id, tp1_order_id=tp1_order_id,
-        )
-        self.risk.open_position(pos)
-        self._log("sig",
-            f"{sig.symbol} score={sig.score:.0f} {sig.direction} "
-            f"entry={entry_price:.4f} sl={stop_loss:.4f} tp1={tp1:.4f} "
-            f"qty={qty} lev=x{leverage} notional={qty*entry_price/leverage:.1f} USDT")
+            result = await self.exec.place_market_order(sig.symbol, entry_side, qty)
+            if not result.get("orderId"):
+                self._log("warn", f"Entry order failed for {sig.symbol}")
+                return
+
+            order_id  = str(result.get("orderId", ""))
+            avg_price = float(result.get("avgPrice") or entry_price)
+            if avg_price > 0:
+                entry_price = avg_price
+                sl_dist = abs(stop_loss - entry_price)
+                stop_loss = (entry_price - sl_dist) if sig.direction == "long" else (entry_price + sl_dist)
+                tp1 = entry_price * (1 + pct * settings.tp1_pct / 100)
+                tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
+                tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
+
+            sl_result = await self.exec.place_stop_loss(
+                sig.symbol, close_side, qty, stop_loss)
+            sl_order_id = str(sl_result.get("orderId", ""))
+
+            _, step, _ = SYMBOL_INFO.get(sig.symbol, (1.0, 1.0, 4))
+            tp1_qty = max(_round_step(qty * 0.5, step), step)
+            tp1_result = await self.exec.place_take_profit(
+                sig.symbol, close_side, tp1_qty, tp1)
+            tp1_order_id = str(tp1_result.get("orderId", ""))
+
+            pos = Position(
+                symbol=sig.symbol, direction=sig.direction,
+                entry_price=entry_price, qty=qty,
+                stop_loss=stop_loss, tp1=tp1, tp2=tp2, tp3=tp3,
+                leverage=leverage,
+                order_id=order_id, sl_order_id=sl_order_id,
+                tp1_order_id=tp1_order_id,
+            )
+            self.risk.open_position(pos)
+            margin = qty * entry_price / leverage
+            self._log("sig",
+                f"{sig.symbol} score={sig.score:.0f} {sig.direction} "
+                f"entry={entry_price:.4f} sl={stop_loss:.4f} tp1={tp1:.4f} "
+                f"qty={qty} lev=x{leverage} margin={margin:.1f} USDT")
+        finally:
+            self._opening.discard(sig.symbol)
 
     # ── Monitor loop ──────────────────────────────────────────
     async def _monitor_loop(self):
         while self._running:
             await asyncio.sleep(1.0)
             for sym, pos in list(self.risk.state.positions.items()):
-                # Skip symbols already being closed
                 if sym in self._closing:
                     continue
 
@@ -351,12 +374,13 @@ class Orchestrator:
                 if sl_hit:
                     self._closing.add(sym)
                     try:
-                        self._log("warn", f"SL hit: {sym} @ {price:.4f} — closing position")
+                        self._log("warn", f"SL hit: {sym} @ {price:.4f} — closing")
                         await self.exec.cancel_all_orders(sym)
-                        await self.exec.place_market_order(sym, close_side, pos.qty, reduce_only=True)
+                        await self.exec.place_market_order(
+                            sym, close_side, pos.qty, reduce_only=True)
                         pnl = self.risk.close_position(sym, price, "SL")
                         self._losses += 1
-                        self._log("warn", f"Closed {sym} SL pnl={pnl:+.2f} USDT")
+                        self._log("warn", f"Closed {sym} SL pnl={pnl:+.4f} USDT")
                     finally:
                         self._closing.discard(sym)
 
@@ -365,7 +389,6 @@ class Orchestrator:
                     self._log("ok", f"TP1 hit: {sym} @ {price:.4f} — 50% closed")
                     if pos.sl_order_id:
                         await self.exec.cancel_order(sym, pos.sl_order_id)
-                    # Update qty to remaining half before placing new SL
                     remaining = max(_round_step(pos.qty * 0.5, step), step)
                     pos.qty = remaining
                     sl_r = await self.exec.place_stop_loss(
@@ -378,13 +401,13 @@ class Orchestrator:
                     try:
                         pos.tp2_hit = True
                         self._log("ok", f"TP2 hit: {sym} @ {price:.4f} — closing rest")
-                        # pos.qty is already the remaining half (set at TP1)
-                        # close ALL of it — do NOT halve again
+                        # pos.qty is already the remaining half after TP1 — close all of it
                         await self.exec.cancel_all_orders(sym)
-                        await self.exec.place_market_order(sym, close_side, pos.qty, reduce_only=True)
+                        await self.exec.place_market_order(
+                            sym, close_side, pos.qty, reduce_only=True)
                         pnl = self.risk.close_position(sym, price, "TP2")
                         self._wins += 1
-                        self._log("ok", f"Closed {sym} TP2 pnl={pnl:+.2f} USDT")
+                        self._log("ok", f"Closed {sym} TP2 pnl={pnl:+.4f} USDT")
                     finally:
                         self._closing.discard(sym)
 
@@ -396,8 +419,11 @@ class Orchestrator:
             return f"Leverage set: {symbol} x{leverage}"
         else:
             self.risk.set_global_leverage(leverage)
-            for sym in list(SYMBOL_INFO.keys()):
-                await self.exec.set_leverage(sym, leverage)
+            # Parallel: all 20 symbols at once instead of serial awaits
+            await asyncio.gather(
+                *[self.exec.set_leverage(sym, leverage) for sym in SYMBOL_INFO],
+                return_exceptions=True,
+            )
             return f"Global leverage set: x{leverage}"
 
     async def force_close(self, symbol: str) -> str:
@@ -418,7 +444,7 @@ class Orchestrator:
             await self.exec.cancel_all_orders(symbol)
             await self.exec.place_market_order(symbol, close_side, pos.qty, reduce_only=True)
             pnl = self.risk.close_position(symbol, cur, "force_close")
-            msg = f"Force closed {symbol} pnl={pnl:+.2f} USDT"
+            msg = f"Force closed {symbol} pnl={pnl:+.4f} USDT"
             self._log("ok" if pnl >= 0 else "warn", msg)
             return msg
         finally:
@@ -460,7 +486,7 @@ class Orchestrator:
                 "tp1_hit": p.tp1_hit, "tp2_hit": p.tp2_hit,
                 "pnl": round(p.pnl, 4), "score": sig.score if sig else 0,
                 "leverage": p.leverage,
-                "notional": round(p.qty * p.entry_price / p.leverage, 2),
+                "margin": round(p.qty * p.entry_price / p.leverage, 2),
                 "rr_ratio": round(rr, 2),
             }
 
@@ -469,17 +495,19 @@ class Orchestrator:
         best = max(self._last_signals.values(), key=lambda x: x.score) if self._last_signals else None
 
         return {
-            "balance":        round(self.risk.state.current_balance, 2),
-            "daily_pnl":      self.daily_pnl(),
-            "drawdown_pct":   round(self.risk.state.drawdown_pct, 2),
-            "wins":           self._wins,
-            "losses":         self._losses,
-            "open_positions": positions,
-            "last_signals":   signals,
-            "live_prices":    self._live_prices(),
-            "equity_history": list(self._equity_history),
-            "leverage_map":   {k: v for k, v in self.risk.leverage_map.items()},
-            "global_leverage": settings.default_leverage,
+            "balance":          round(self.risk.state.current_balance, 2),
+            "total_equity":     round(self.risk.state.total_equity, 2),
+            "unrealized_pnl":   round(self.risk.state.unrealized_pnl, 4),
+            "daily_pnl":        self.daily_pnl(),
+            "drawdown_pct":     round(self.risk.state.drawdown_pct, 2),
+            "wins":             self._wins,
+            "losses":           self._losses,
+            "open_positions":   positions,
+            "last_signals":     signals,
+            "live_prices":      self._live_prices(),
+            "equity_history":   list(self._equity_history),
+            "leverage_map":     {k: v for k, v in self.risk.leverage_map.items()},
+            "global_leverage":  settings.default_leverage,
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {

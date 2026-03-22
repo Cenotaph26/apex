@@ -1,12 +1,24 @@
 """
-Risk Manager v4
+Risk Manager v5
 
-Fixes vs v3:
-1. MAX_NOTIONAL is now dynamic — capped at 10% of current balance per trade.
-   Previously hardcoded to 500 USDT regardless of account size.
-2. position_size() receives current_balance at call time — no stale reference.
-3. close_position comment clarified (local update is temporary, overridden by
-   _balance_loop every 30s with real walletBalance from exchange).
+Fixes vs v4:
+1. PnL formula corrected — USDT-margined futures:
+      pnl = (exit - entry) * qty          ← correct
+   was: pnl = (exit - entry) * qty / lev  ← wrong (5x understated at x5 lev)
+   Leverage only affects margin requirement, not PnL.
+
+2. Drawdown now includes unrealized PnL from open positions.
+   Previously drawdown was based solely on walletBalance (realized),
+   meaning a position down 7% unrealized showed 0% drawdown and the
+   circuit breaker never fired. Now:
+      drawdown = (peak - (wallet + unrealized_pnl)) / peak
+
+3. Dynamic MAX_NOTIONAL_PCT (10% of balance) — replaces hardcoded 500 USDT.
+
+4. qty_risk formula corrected to match PnL formula:
+   For USDT-margined futures, risk at SL = sl_distance * qty (no leverage).
+   qty = risk_usdt / sl_distance  (leverage only determines how much margin
+   is required, not how many contracts fit the risk budget).
 """
 from __future__ import annotations
 import logging
@@ -33,9 +45,7 @@ SYMBOL_INFO: dict[str, tuple[float, float, int]] = {
     "INJUSDT":   (0.1,   0.1,   3), "SUIUSDT":   (1.0,   1.0,   5),
 }
 
-# Max position size as a fraction of account balance.
-# e.g. 0.10 → never risk more than 10% of balance as notional per trade.
-# Replaces the old hardcoded 500 USDT cap which didn't scale with account size.
+# Max position notional as fraction of account balance per trade.
 MAX_NOTIONAL_PCT = 0.10
 
 
@@ -83,26 +93,40 @@ class Position:
     order_id:     str   = ""
     sl_order_id:  str   = ""
     tp1_order_id: str   = ""
-    pnl:          float = 0.0
+    pnl:          float = 0.0   # unrealized, updated every tick
 
 
 @dataclass
 class RiskState:
     starting_balance: float
-    current_balance:  float
-    peak_balance:     float
+    current_balance:  float   # walletBalance from exchange (realized only)
+    peak_balance:     float   # peak of (wallet + unrealized) equity
     positions: dict[str, Position] = field(default_factory=dict)
     closed_pnl: float = 0.0
 
     @property
+    def unrealized_pnl(self) -> float:
+        return sum(p.pnl for p in self.positions.values())
+
+    @property
+    def total_equity(self) -> float:
+        """Wallet balance + open unrealized PnL — true account value."""
+        return self.current_balance + self.unrealized_pnl
+
+    @property
     def drawdown_pct(self) -> float:
+        """
+        Drawdown from peak equity, including unrealized losses.
+        Uses total_equity so an open position bleeding 7% doesn't hide
+        behind walletBalance staying flat.
+        """
         if self.peak_balance == 0:
             return 0.0
-        return max(0.0, (self.peak_balance - self.current_balance) / self.peak_balance * 100)
+        return max(0.0, (self.peak_balance - self.total_equity) / self.peak_balance * 100)
 
     @property
     def daily_pnl(self) -> float:
-        return self.closed_pnl + sum(p.pnl for p in self.positions.values())
+        return self.closed_pnl + self.unrealized_pnl
 
 
 class RiskManager:
@@ -129,13 +153,18 @@ class RiskManager:
         settings.default_leverage = leverage
         log.info("Global leverage set: x%d", leverage)
 
-    def can_open(self, symbol: str, direction: str, buffers: dict[str, CandleBuffer]) -> tuple[bool, str]:
+    def can_open(self, symbol: str, direction: str,
+                 buffers: dict[str, CandleBuffer]) -> tuple[bool, str]:
         if symbol in self.state.positions:
             return False, f"already have position in {symbol}"
         if len(self.state.positions) >= settings.max_open_positions:
             return False, f"max positions reached ({settings.max_open_positions})"
         if self.state.drawdown_pct >= settings.max_drawdown_pct:
-            return False, f"drawdown {self.state.drawdown_pct:.1f}% >= {settings.max_drawdown_pct}%"
+            return False, (
+                f"drawdown {self.state.drawdown_pct:.1f}% "
+                f">= {settings.max_drawdown_pct}% "
+                f"(equity={self.state.total_equity:.2f} peak={self.state.peak_balance:.2f})"
+            )
         open_risk = len(self.state.positions) * settings.risk_per_trade_pct
         if open_risk + settings.risk_per_trade_pct > settings.max_portfolio_risk_pct:
             return False, "portfolio risk cap reached"
@@ -152,7 +181,16 @@ class RiskManager:
 
     def position_size(self, symbol: str, entry_price: float, direction: str,
                       buf: CandleBuffer) -> tuple[float, float, float]:
-        """Returns (qty, stop_loss, tp1)."""
+        """
+        Returns (qty, stop_loss, tp1).
+
+        For USDT-margined futures:
+          actual_loss_at_SL = sl_distance * qty   (leverage doesn't affect this)
+          qty = risk_usdt / sl_distance
+
+        The leverage multiplier only determines how much margin is reserved,
+        not how many contracts we can buy per dollar of risk.
+        """
         info = SYMBOL_INFO.get(symbol, (1.0, 1.0, 4))
         min_qty, step_size, _ = info
         leverage = self.get_leverage(symbol)
@@ -171,56 +209,75 @@ class RiskManager:
             stop_loss = entry_price + sl_distance
             tp1 = entry_price * (1 - settings.tp1_pct / 100)
 
+        # Risk budget in USDT
         risk_usdt = self.state.current_balance * settings.risk_per_trade_pct / 100
-        qty_risk  = (risk_usdt * leverage) / sl_distance
 
-        # Dynamic notional cap: scales with account size (replaces hardcoded 500 USDT)
+        # Correct formula: qty = risk / sl_distance (no leverage factor)
+        qty_risk = risk_usdt / sl_distance
+
+        # Notional cap: don't put more than MAX_NOTIONAL_PCT of balance in one trade
         max_notional = self.state.current_balance * MAX_NOTIONAL_PCT
-        qty_cap = (max_notional * leverage) / entry_price
+        qty_cap = max_notional / entry_price   # no leverage factor here either
 
         qty = _round_step(min(qty_risk, qty_cap), step_size)
         qty = max(qty, min_qty)
 
-        log.info("Position size %s: entry=%.4f sl_dist=%.5f lev=x%d "
-                 "qty=%.4f notional=%.2f USDT (cap=%.2f)",
-                 symbol, entry_price, sl_distance, leverage,
-                 qty, qty * entry_price / leverage, max_notional)
+        margin_required = qty * entry_price / leverage
+        log.info(
+            "Position size %s: entry=%.4f sl_dist=%.5f lev=x%d "
+            "qty=%.4f risk=%.2f USDT margin=%.2f USDT (cap_notional=%.2f)",
+            symbol, entry_price, sl_distance, leverage,
+            qty, sl_distance * qty, margin_required, max_notional,
+        )
 
         return qty, round(stop_loss, 8), round(tp1, 8)
 
     def open_position(self, pos: Position):
         self.state.positions[pos.symbol] = pos
-        log.info("OPENED %s %s lev=x%d qty=%.4f entry=%.4f sl=%.4f notional=%.2f",
+        margin = pos.qty * pos.entry_price / pos.leverage
+        log.info("OPENED %s %s lev=x%d qty=%.4f entry=%.4f sl=%.4f margin=%.2f USDT",
                  pos.symbol, pos.direction, pos.leverage,
-                 pos.qty, pos.entry_price, pos.stop_loss,
-                 pos.qty * pos.entry_price / pos.leverage)
+                 pos.qty, pos.entry_price, pos.stop_loss, margin)
 
     def close_position(self, symbol: str, exit_price: float, reason: str = "") -> float:
         pos = self.state.positions.pop(symbol, None)
         if pos is None:
             return 0.0
+
+        # Correct USDT-margined futures PnL: no leverage divisor
         if pos.direction == "long":
-            pnl = (exit_price - pos.entry_price) * pos.qty / pos.leverage
+            pnl = (exit_price - pos.entry_price) * pos.qty
         else:
-            pnl = (pos.entry_price - exit_price) * pos.qty / pos.leverage
+            pnl = (pos.entry_price - exit_price) * pos.qty
+
         self.state.closed_pnl += pnl
-        # Local update for immediate dashboard feedback.
-        # _balance_loop will overwrite with real walletBalance within 30s.
+        # Update wallet locally for immediate dashboard feedback.
+        # _balance_loop overwrites with real walletBalance within 30s.
         self.state.current_balance += pnl
+        # Update peak with realized equity
         if self.state.current_balance > self.state.peak_balance:
             self.state.peak_balance = self.state.current_balance
-        log.info("CLOSED %s [%s] exit=%.4f pnl=%+.2f balance=%.2f",
-                 symbol, reason or "manual", exit_price, pnl, self.state.current_balance)
+        log.info("CLOSED %s [%s] exit=%.4f pnl=%+.4f USDT balance=%.2f",
+                 symbol, reason or "manual", exit_price, pnl,
+                 self.state.current_balance)
         return pnl
 
     def update_pnl(self, symbol: str, current_price: float):
+        """Update unrealized PnL and peak equity for drawdown calculation."""
         pos = self.state.positions.get(symbol)
         if pos is None:
             return
+
+        # Correct USDT-margined futures unrealized PnL
         if pos.direction == "long":
-            pos.pnl = (current_price - pos.entry_price) * pos.qty / pos.leverage
+            pos.pnl = (current_price - pos.entry_price) * pos.qty
         else:
-            pos.pnl = (pos.entry_price - current_price) * pos.qty / pos.leverage
+            pos.pnl = (pos.entry_price - current_price) * pos.qty
+
+        # Keep peak updated with unrealized gains so drawdown reflects true high
+        equity = self.state.total_equity
+        if equity > self.state.peak_balance:
+            self.state.peak_balance = equity
 
     def position_count(self) -> int:
         return len(self.state.positions)

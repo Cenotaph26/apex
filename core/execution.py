@@ -65,7 +65,7 @@ class ExecutionEngine:
     async def _get(self, path: str, params: dict | None = None) -> dict | list:
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000) + await self._offset()
-        p["recvWindow"] = 60000
+        p["recvWindow"] = 5000  # was 60000 — that's a replay-attack window
         qs = urllib.parse.urlencode(p)
         p["signature"] = _sign(qs, settings.api_secret)
         r = await self._client.get(path, params=p)
@@ -77,7 +77,7 @@ class ExecutionEngine:
     async def _post(self, path: str, params: dict | None = None) -> dict:
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000) + await self._offset()
-        p["recvWindow"] = 60000
+        p["recvWindow"] = 5000
         qs = urllib.parse.urlencode(p)
         p["signature"] = _sign(qs, settings.api_secret)
         body = urllib.parse.urlencode(p).encode()
@@ -91,7 +91,7 @@ class ExecutionEngine:
     async def _delete(self, path: str, params: dict | None = None) -> dict:
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000) + await self._offset()
-        p["recvWindow"] = 60000
+        p["recvWindow"] = 5000
         qs = urllib.parse.urlencode(p)
         p["signature"] = _sign(qs, settings.api_secret)
         r = await self._client.delete(path, params=p)
