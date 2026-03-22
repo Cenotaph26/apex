@@ -1,11 +1,16 @@
 """
-ExecutionEngine v3 — Binance Futures Demo.
+ExecutionEngine v4
 
-Key improvements:
-- cancel_all_and_close(): emergency close via market order + cancel all open orders
-- sync_positions(): fetch real positions from exchange, reconcile with bot state
-- Proper reduceOnly on close orders
-- Detailed logging of every order response
+Key change vs v3:
+- place_stop_loss() and place_take_profit() are REMOVED from active use.
+  Binance Futures testnet returns -4120 for STOP_MARKET / TAKE_PROFIT_MARKET
+  on /fapi/v1/order ("Order type not supported — use Algo Order API instead").
+  Instead, SL and TP are managed entirely in software by the monitor_loop.
+  Only MARKET orders (entry + manual close) are sent to the exchange.
+
+- get_open_positions() kept for sync_loop reconciliation.
+- get_balance() kept with walletBalance fallback chain for testnet.
+- recvWindow = 5000ms (was 60000 — replay attack window).
 """
 from __future__ import annotations
 import asyncio
@@ -36,15 +41,14 @@ class ExecutionEngine:
         )
         self._dry_run = not bool(settings.api_key)
         self._offset_ms: int = 0
-        self._offset_at:  float = 0.0
-        mode = "Futures Demo" if settings.is_futures_demo else "Spot Testnet"
+        self._offset_at: float = 0.0
         if self._dry_run:
             log.warning("DRY-RUN mode — no real orders")
         else:
-            log.info("ExecutionEngine [%s] %s key=...%s",
-                     mode, settings.rest_base, settings.api_key[-6:])
+            log.info("ExecutionEngine [Futures Demo] %s key=...%s",
+                     settings.rest_base, settings.api_key[-6:])
 
-    # ── Time ──────────────────────────────────────────────────
+    # ── Time sync ─────────────────────────────────────────────
     async def _sync_time(self):
         path = "/fapi/v1/time" if settings.is_futures_demo else "/api/v3/time"
         try:
@@ -65,7 +69,7 @@ class ExecutionEngine:
     async def _get(self, path: str, params: dict | None = None) -> dict | list:
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000) + await self._offset()
-        p["recvWindow"] = 5000  # was 60000 — that's a replay-attack window
+        p["recvWindow"] = 5000
         qs = urllib.parse.urlencode(p)
         p["signature"] = _sign(qs, settings.api_secret)
         r = await self._client.get(path, params=p)
@@ -103,15 +107,10 @@ class ExecutionEngine:
     # ── Balance ───────────────────────────────────────────────
     async def get_balance(self) -> float:
         """
-        Returns the true account equity (walletBalance).
-
-        Binance testnet quirk: /fapi/v2/balance returns walletBalance=0
-        and puts the real value in 'balance' (or sometimes only availableBalance).
-        We use a fallback chain to handle all cases:
-          1. walletBalance  (live futures — correct field)
-          2. balance        (testnet alternate field name)
-          3. availableBalance — ONLY when no positions are open
-             (when positions exist, available < wallet due to margin lock)
+        walletBalance > balance > availableBalance fallback chain.
+        Testnet returns walletBalance=0, real value is in 'balance'.
+        availableBalance drops when positions are open — only use as
+        last resort when no positions exist.
         """
         if self._dry_run:
             return 1000.0
@@ -128,7 +127,6 @@ class ExecutionEngine:
                             "availableBalance: %.2f",
                             wallet_bal, balance_f, avail_bal,
                         )
-                        # Priority: walletBalance > balance > availableBalance
                         result = wallet_bal or balance_f or avail_bal
                         if result > 0:
                             return result
@@ -158,7 +156,6 @@ class ExecutionEngine:
 
     # ── Open positions from exchange ──────────────────────────
     async def get_open_positions(self) -> list[dict]:
-        """Fetch real open positions from Futures exchange."""
         if self._dry_run or not settings.is_futures_demo:
             return []
         try:
@@ -168,7 +165,7 @@ class ExecutionEngine:
             log.error("Get positions failed: %s", e)
             return []
 
-    # ── Market order ──────────────────────────────────────────
+    # ── Market order (entry + manual close) ───────────────────
     async def place_market_order(self, symbol: str, side: str, qty: float,
                                   reduce_only: bool = False) -> dict:
         if self._dry_run:
@@ -189,73 +186,23 @@ class ExecutionEngine:
         try:
             r = await self._post(path, params)
             log.info("MARKET %s %s %.4f → id=%s status=%s avgPrice=%s",
-                     side, symbol, qty, r.get("orderId"), r.get("status"), r.get("avgPrice","?"))
+                     side, symbol, qty, r.get("orderId"), r.get("status"),
+                     r.get("avgPrice", "?"))
             return r
         except Exception as e:
             log.error("Market order FAILED %s %s %.4f: %s", side, symbol, qty, e)
             return {}
 
-    # ── Stop-loss (STOP_MARKET on exchange) ───────────────────
-    async def place_stop_loss(self, symbol: str, side: str, qty: float,
-                               stop_price: float) -> dict:
-        if self._dry_run:
-            log.info("[DRY] STOP_MARKET %s %s %.4f @ %.5f", side, symbol, qty, stop_price)
-            return {"orderId": f"dry_sl_{int(time.time())}"}
-        if not settings.is_futures_demo:
-            return {}
-
-        from core.risk import SYMBOL_INFO
-        _, _, pp = SYMBOL_INFO.get(symbol, (1.0, 1.0, 4))
-        sp = round(stop_price, pp)
-
+    # ── Cancel all open orders ────────────────────────────────
+    async def cancel_all_orders(self, symbol: str):
+        if self._dry_run or not settings.is_futures_demo:
+            return
         try:
-            r = await self._post("/fapi/v1/order", {
-                "symbol":      symbol,
-                "side":        side,
-                "type":        "STOP_MARKET",
-                "quantity":    str(qty),
-                "stopPrice":   f"{sp:.{pp}f}",
-                "reduceOnly":  "true",
-                "workingType": "MARK_PRICE",
-                "timeInForce": "GTE_GTC",
-            })
-            log.info("STOP_MARKET %s %s @ %.5f id=%s", side, symbol, sp, r.get("orderId"))
-            return r
+            await self._delete("/fapi/v1/allOpenOrders", {"symbol": symbol})
+            log.info("All orders cancelled: %s", symbol)
         except Exception as e:
-            log.error("Stop loss FAILED %s %s: %s", side, symbol, e)
-            return {}
+            log.warning("Cancel all failed %s: %s", symbol, e)
 
-    # ── Take-profit (TAKE_PROFIT_MARKET on exchange) ──────────
-    async def place_take_profit(self, symbol: str, side: str, qty: float,
-                                 stop_price: float) -> dict:
-        if self._dry_run:
-            log.info("[DRY] TP_MARKET %s %s %.4f @ %.5f", side, symbol, qty, stop_price)
-            return {"orderId": f"dry_tp_{int(time.time())}"}
-        if not settings.is_futures_demo:
-            return {}
-
-        from core.risk import SYMBOL_INFO
-        _, _, pp = SYMBOL_INFO.get(symbol, (1.0, 1.0, 4))
-        sp = round(stop_price, pp)
-
-        try:
-            r = await self._post("/fapi/v1/order", {
-                "symbol":      symbol,
-                "side":        side,
-                "type":        "TAKE_PROFIT_MARKET",
-                "quantity":    str(qty),
-                "stopPrice":   f"{sp:.{pp}f}",
-                "reduceOnly":  "true",
-                "workingType": "MARK_PRICE",
-                "timeInForce": "GTE_GTC",
-            })
-            log.info("TP_MARKET %s %s @ %.5f id=%s", side, symbol, sp, r.get("orderId"))
-            return r
-        except Exception as e:
-            log.error("Take profit FAILED %s %s: %s", side, symbol, e)
-            return {}
-
-    # ── Cancel ────────────────────────────────────────────────
     async def cancel_order(self, symbol: str, order_id: str) -> bool:
         if self._dry_run or not order_id:
             return True
@@ -267,23 +214,6 @@ class ExecutionEngine:
         except Exception as e:
             log.warning("Cancel failed %s %s: %s", symbol, order_id, e)
             return False
-
-    async def cancel_all_orders(self, symbol: str):
-        if self._dry_run or not settings.is_futures_demo:
-            return
-        try:
-            await self._delete("/fapi/v1/allOpenOrders", {"symbol": symbol})
-            log.info("All orders cancelled: %s", symbol)
-        except Exception as e:
-            log.warning("Cancel all failed %s: %s", symbol, e)
-
-    # ── Emergency close: cancel all + market close ────────────
-    async def emergency_close(self, symbol: str, side: str, qty: float):
-        """Cancel all open orders then close position with market order."""
-        log.warning("EMERGENCY CLOSE: %s %s qty=%.4f", symbol, side, qty)
-        await self.cancel_all_orders(symbol)
-        await asyncio.sleep(0.2)
-        await self.place_market_order(symbol, side, qty, reduce_only=True)
 
     async def close(self):
         await self._client.aclose()

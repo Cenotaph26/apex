@@ -90,6 +90,7 @@ class Position:
     leverage:     int   = 1
     tp1_hit:      bool  = False
     tp2_hit:      bool  = False
+    tp3_hit:      bool  = False
     order_id:     str   = ""
     sl_order_id:  str   = ""
     tp1_order_id: str   = ""

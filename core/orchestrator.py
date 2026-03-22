@@ -1,14 +1,21 @@
 """
-Orchestrator v5
+Orchestrator v6 — Software-managed SL/TP
 
-Fixes vs v4:
-1. Lock deadlock risk removed — _try_open no longer called inside lock.
-   Duplicate-open prevention is now handled by checking positions dict
-   and using _opening set, not a blanket lock over async HTTP calls.
-2. Global leverage now parallel — asyncio.gather instead of 20 serial awaits.
-3. snapshot() exposes total_equity and unrealized_pnl for dashboard.
-4. SSE generator properly detects client disconnect via GeneratorExit.
-5. Balance loop updates peak with total_equity (wallet + unrealized).
+Root cause fix:
+  Binance Futures testnet rejects STOP_MARKET and TAKE_PROFIT_MARKET
+  orders with -4120 ("use Algo Order API"). So exchange-side SL/TP
+  orders were never actually placed — Binance showed nothing, and
+  TP1 partial close never executed on the exchange.
+
+New approach — everything managed in monitor_loop:
+  1. Entry:  MARKET order only (always works)
+  2. SL:     monitor_loop watches price every second, fires MARKET close
+  3. TP1:    monitor_loop detects price ≥ tp1 → MARKET close 50% qty
+  4. TP2:    monitor_loop detects price ≥ tp2 → MARKET close remaining 50%
+  5. TP3:    monitor_loop detects price ≥ tp3 → MARKET close any remainder
+
+All three TP levels are tracked independently. This gives the dashboard
+accurate PnL and ensures every partial close actually hits the exchange.
 """
 from __future__ import annotations
 import asyncio
@@ -32,6 +39,11 @@ log = logging.getLogger("apex.orchestrator")
 
 MAX_LOG_LINES  = 60
 MAX_EQUITY_PTS = 120
+
+# What fraction of the original position to close at each TP level
+TP1_CLOSE_PCT = 0.50   # close 50% at TP1
+TP2_CLOSE_PCT = 0.50   # close 50% of remaining (= 25% of original) at TP2
+# TP3 closes everything left
 
 
 @dataclass
@@ -62,28 +74,21 @@ class Orchestrator:
         self._last_signals: dict[str, CoinSignal] = {}
         self._pending_eval: set[str] = set()
 
-        # Separate locks for distinct concerns — no nested locking
-        self._eval_lock   = asyncio.Lock()  # serializes candle batch processing
-        self._open_lock   = asyncio.Lock()  # serializes position opens
-
-        # Guards against double-close races (monitor vs sync loop)
-        self._closing: set[str] = set()
-
-        # Symbols currently being opened (prevents duplicate opens)
-        self._opening: set[str] = set()
-
-        # Remembered unknown exchange positions — warn once only
+        self._eval_lock  = asyncio.Lock()
+        self._open_lock  = asyncio.Lock()
+        self._closing:  set[str] = set()
+        self._opening:  set[str] = set()
         self._warned_unknown: set[str] = set()
 
         self._logs: deque[LogEntry] = deque(maxlen=MAX_LOG_LINES)
         self._equity_history: deque[dict] = deque(maxlen=MAX_EQUITY_PTS)
-        self._wins:   int = 0
-        self._losses: int = 0
-        self._start_time: float = time.time()
+        self._wins   = 0
+        self._losses = 0
+        self._start_time = time.time()
 
         self.feed.on_candle_close(self._on_candle_close)
 
-    # ── Log helper ────────────────────────────────────────────
+    # ── Logging ───────────────────────────────────────────────
     def _log(self, lvl: str, msg: str):
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self._logs.appendleft(LogEntry(ts=ts, lvl=lvl, msg=msg))
@@ -125,7 +130,6 @@ class Orchestrator:
                 if bal > 0:
                     old = self.risk.state.current_balance
                     self.risk.state.current_balance = bal
-                    # Peak should reflect total equity (wallet + unrealized)
                     equity = self.risk.state.total_equity
                     if equity > self.risk.state.peak_balance:
                         self.risk.state.peak_balance = equity
@@ -146,9 +150,9 @@ class Orchestrator:
 
     async def _sync_positions_loop(self):
         """
-        Every 30s: compare bot state vs exchange.
-        - Bot has position, exchange doesn't → SL/TP filled externally, clean up.
-        - Exchange has position bot doesn't know → warn ONCE per symbol.
+        Every 30s reconcile bot state with exchange.
+        If exchange closed a position (SL filled externally, manual close),
+        clean up bot state so we don't hold a ghost position.
         """
         await asyncio.sleep(35)
         while self._running:
@@ -176,13 +180,11 @@ class Orchestrator:
                                 self._wins += 1
                             else:
                                 self._losses += 1
-                            await self.exec.cancel_all_orders(sym)
                             self._log("ok" if pnl >= 0 else "warn",
                                 f"Position synced closed: {sym} pnl={pnl:+.4f} USDT")
                         finally:
                             self._closing.discard(sym)
 
-                # Warn about unknown exchange positions — only once per symbol
                 current_unknowns: set[str] = set()
                 for ep in ex_positions:
                     sym = ep["symbol"]
@@ -194,7 +196,6 @@ class Orchestrator:
                                 f"Unknown position on exchange: {sym} amt={amt:.4f} "
                                 f"(not tracked by bot — manually opened?)")
                             self._warned_unknown.add(sym)
-                # Clear when position is gone
                 self._warned_unknown &= current_unknowns
 
             except Exception as e:
@@ -209,12 +210,10 @@ class Orchestrator:
             if not self._pending_eval:
                 continue
 
-            # Drain pending set under short lock
             async with self._eval_lock:
                 batch = self._pending_eval.copy()
                 self._pending_eval.clear()
 
-            # Score all coins — funding HTTP calls happen here
             signals: list[CoinSignal] = []
             for sym in batch:
                 sig = await self._score_coin(sym)
@@ -235,7 +234,7 @@ class Orchestrator:
             if winner.score >= settings.score_threshold:
                 await self._try_open(winner)
 
-    # ── Score ─────────────────────────────────────────────────
+    # ── Scoring ───────────────────────────────────────────────
     async def _score_coin(self, symbol: str) -> CoinSignal | None:
         buf = self.feed.buffers.get(symbol)
         if buf is None or len(buf) < 30:
@@ -257,13 +256,10 @@ class Orchestrator:
 
     # ── Open position ─────────────────────────────────────────
     async def _try_open(self, sig: CoinSignal):
-        # Fast pre-check before acquiring lock
         if sig.symbol in self._opening or sig.symbol in self.risk.state.positions:
             return
 
-        # Serialize opens with a dedicated lock (no HTTP inside eval_lock)
         async with self._open_lock:
-            # Re-check inside lock — another task may have opened between pre-check and here
             if sig.symbol in self._opening or sig.symbol in self.risk.state.positions:
                 return
 
@@ -274,7 +270,6 @@ class Orchestrator:
 
             self._opening.add(sig.symbol)
 
-        # HTTP calls happen OUTSIDE the lock to avoid blocking other opens
         try:
             buf = self.feed.buffers.get(sig.symbol)
             if not buf or not buf.closed:
@@ -294,17 +289,17 @@ class Orchestrator:
             tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
             tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
+            # 1. Set leverage on exchange
             await self.exec.set_leverage(sig.symbol, leverage)
 
             entry_side = "BUY" if sig.direction == "long" else "SELL"
-            close_side = "SELL" if sig.direction == "long" else "BUY"
 
+            # 2. Entry MARKET order — only order type sent to exchange
             result = await self.exec.place_market_order(sig.symbol, entry_side, qty)
             if not result.get("orderId"):
                 self._log("warn", f"Entry order failed for {sig.symbol}")
                 return
 
-            order_id  = str(result.get("orderId", ""))
             avg_price = float(result.get("avgPrice") or entry_price)
             if avg_price > 0:
                 entry_price = avg_price
@@ -314,35 +309,43 @@ class Orchestrator:
                 tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
                 tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
-            sl_result = await self.exec.place_stop_loss(
-                sig.symbol, close_side, qty, stop_loss)
-            sl_order_id = str(sl_result.get("orderId", ""))
-
-            _, step, _ = SYMBOL_INFO.get(sig.symbol, (1.0, 1.0, 4))
-            tp1_qty = max(_round_step(qty * 0.5, step), step)
-            tp1_result = await self.exec.place_take_profit(
-                sig.symbol, close_side, tp1_qty, tp1)
-            tp1_order_id = str(tp1_result.get("orderId", ""))
-
             pos = Position(
                 symbol=sig.symbol, direction=sig.direction,
                 entry_price=entry_price, qty=qty,
                 stop_loss=stop_loss, tp1=tp1, tp2=tp2, tp3=tp3,
                 leverage=leverage,
-                order_id=order_id, sl_order_id=sl_order_id,
-                tp1_order_id=tp1_order_id,
+                order_id=str(result.get("orderId", "")),
             )
             self.risk.open_position(pos)
+
             margin = qty * entry_price / leverage
+            _, step, _ = SYMBOL_INFO.get(sig.symbol, (1.0, 1.0, 4))
+            tp1_qty = max(_round_step(qty * TP1_CLOSE_PCT, step), step)
+
             self._log("sig",
                 f"{sig.symbol} score={sig.score:.0f} {sig.direction} "
-                f"entry={entry_price:.4f} sl={stop_loss:.4f} tp1={tp1:.4f} "
+                f"entry={entry_price:.4f} "
+                f"sl={stop_loss:.4f} "
+                f"tp1={tp1:.4f} ({tp1_qty:.4f} lots / {TP1_CLOSE_PCT*100:.0f}%) "
+                f"tp2={tp2:.4f}  tp3={tp3:.4f} "
                 f"qty={qty} lev=x{leverage} margin={margin:.1f} USDT")
         finally:
             self._opening.discard(sig.symbol)
 
-    # ── Monitor loop ──────────────────────────────────────────
+    # ── Monitor loop — SOFTWARE SL/TP ─────────────────────────
     async def _monitor_loop(self):
+        """
+        Runs every second. Manages SL and all TP levels entirely in software.
+
+        SL  → close full remaining qty at market
+        TP1 → close TP1_CLOSE_PCT (50%) of original qty at market,
+               then move SL to breakeven
+        TP2 → close TP2_CLOSE_PCT (50%) of remaining qty at market
+        TP3 → close whatever is left at market
+
+        All partial closes send a MARKET reduceOnly order to the exchange,
+        so Binance always reflects the correct position size.
+        """
         while self._running:
             await asyncio.sleep(1.0)
             for sym, pos in list(self.risk.state.positions.items()):
@@ -360,54 +363,108 @@ class Orchestrator:
                 self.risk.update_pnl(sym, price)
 
                 close_side = "SELL" if pos.direction == "long" else "BUY"
-                _, step, _ = SYMBOL_INFO.get(sym, (1.0, 1.0, 4))
+                _, step, pp = SYMBOL_INFO.get(sym, (1.0, 1.0, 4))
 
-                if pos.direction == "long":
-                    sl_hit  = price <= pos.stop_loss
-                    tp1_hit = price >= pos.tp1 and not pos.tp1_hit
-                    tp2_hit = price >= pos.tp2 and pos.tp1_hit and not pos.tp2_hit
-                else:
-                    sl_hit  = price >= pos.stop_loss
-                    tp1_hit = price <= pos.tp1 and not pos.tp1_hit
-                    tp2_hit = price <= pos.tp2 and pos.tp1_hit and not pos.tp2_hit
+                lng = pos.direction == "long"
 
+                # ── SL ────────────────────────────────────────
+                sl_hit = price <= pos.stop_loss if lng else price >= pos.stop_loss
+
+                # ── TP1 ───────────────────────────────────────
+                tp1_hit = (not pos.tp1_hit and
+                           (price >= pos.tp1 if lng else price <= pos.tp1))
+
+                # ── TP2 (only after TP1 hit) ──────────────────
+                tp2_hit = (pos.tp1_hit and not pos.tp2_hit and
+                           (price >= pos.tp2 if lng else price <= pos.tp2))
+
+                # ── TP3 (only after TP2 hit) ──────────────────
+                tp3_hit = (pos.tp2_hit and not pos.tp3_hit and
+                           (price >= pos.tp3 if lng else price <= pos.tp3))
+
+                # ─────────────────────────────────────────────
                 if sl_hit:
                     self._closing.add(sym)
                     try:
-                        self._log("warn", f"SL hit: {sym} @ {price:.4f} — closing")
-                        await self.exec.cancel_all_orders(sym)
-                        await self.exec.place_market_order(
+                        self._log("warn",
+                            f"SL hit: {sym} @ {price:.{pp}f} "
+                            f"(sl={pos.stop_loss:.{pp}f}) — closing {pos.qty} lots")
+                        r = await self.exec.place_market_order(
                             sym, close_side, pos.qty, reduce_only=True)
-                        pnl = self.risk.close_position(sym, price, "SL")
-                        self._losses += 1
-                        self._log("warn", f"Closed {sym} SL pnl={pnl:+.4f} USDT")
+                        if r.get("orderId"):
+                            pnl = self.risk.close_position(sym, price, "SL")
+                            self._losses += 1
+                            self._log("warn",
+                                f"Closed {sym} SL pnl={pnl:+.4f} USDT")
+                        else:
+                            self._log("err",
+                                f"SL market order FAILED for {sym} — retrying next tick")
+                            # Don't close position state — will retry next second
                     finally:
                         self._closing.discard(sym)
 
                 elif tp1_hit:
-                    pos.tp1_hit = True
-                    self._log("ok", f"TP1 hit: {sym} @ {price:.4f} — 50% closed")
-                    if pos.sl_order_id:
-                        await self.exec.cancel_order(sym, pos.sl_order_id)
-                    remaining = max(_round_step(pos.qty * 0.5, step), step)
-                    pos.qty = remaining
-                    sl_r = await self.exec.place_stop_loss(
-                        sym, close_side, remaining, pos.entry_price)
-                    pos.sl_order_id = str(sl_r.get("orderId", ""))
-                    self._log("ok", f"SL moved to breakeven: {sym} @ {pos.entry_price:.4f}")
+                    self._closing.add(sym)
+                    try:
+                        close_qty = max(_round_step(pos.qty * TP1_CLOSE_PCT, step), step)
+                        self._log("ok",
+                            f"TP1 hit: {sym} @ {price:.{pp}f} "
+                            f"— closing {close_qty} lots ({TP1_CLOSE_PCT*100:.0f}%)")
+                        r = await self.exec.place_market_order(
+                            sym, close_side, close_qty, reduce_only=True)
+                        if r.get("orderId"):
+                            pos.tp1_hit = True
+                            remaining = max(_round_step(pos.qty - close_qty, step), step)
+                            pos.qty = remaining
+                            # Move SL to breakeven
+                            pos.stop_loss = pos.entry_price
+                            self._log("ok",
+                                f"SL moved to breakeven: {sym} @ {pos.entry_price:.{pp}f} "
+                                f"| remaining qty={remaining}")
+                        else:
+                            self._log("err",
+                                f"TP1 market order FAILED for {sym} — retrying next tick")
+                    finally:
+                        self._closing.discard(sym)
 
                 elif tp2_hit:
                     self._closing.add(sym)
                     try:
-                        pos.tp2_hit = True
-                        self._log("ok", f"TP2 hit: {sym} @ {price:.4f} — closing rest")
-                        # pos.qty is already the remaining half after TP1 — close all of it
-                        await self.exec.cancel_all_orders(sym)
-                        await self.exec.place_market_order(
+                        close_qty = max(_round_step(pos.qty * TP2_CLOSE_PCT, step), step)
+                        self._log("ok",
+                            f"TP2 hit: {sym} @ {price:.{pp}f} "
+                            f"— closing {close_qty} lots ({TP2_CLOSE_PCT*100:.0f}% of remaining)")
+                        r = await self.exec.place_market_order(
+                            sym, close_side, close_qty, reduce_only=True)
+                        if r.get("orderId"):
+                            pos.tp2_hit = True
+                            remaining = max(_round_step(pos.qty - close_qty, step), step)
+                            pos.qty = remaining
+                            self._log("ok",
+                                f"TP2 partial closed: {sym} | remaining qty={remaining}")
+                        else:
+                            self._log("err",
+                                f"TP2 market order FAILED for {sym}")
+                    finally:
+                        self._closing.discard(sym)
+
+                elif tp3_hit:
+                    self._closing.add(sym)
+                    try:
+                        self._log("ok",
+                            f"TP3 hit: {sym} @ {price:.{pp}f} "
+                            f"— closing remaining {pos.qty} lots")
+                        r = await self.exec.place_market_order(
                             sym, close_side, pos.qty, reduce_only=True)
-                        pnl = self.risk.close_position(sym, price, "TP2")
-                        self._wins += 1
-                        self._log("ok", f"Closed {sym} TP2 pnl={pnl:+.4f} USDT")
+                        if r.get("orderId"):
+                            pos.tp3_hit = True
+                            pnl = self.risk.close_position(sym, price, "TP3")
+                            self._wins += 1
+                            self._log("ok",
+                                f"Closed {sym} TP3 pnl={pnl:+.4f} USDT")
+                        else:
+                            self._log("err",
+                                f"TP3 market order FAILED for {sym}")
                     finally:
                         self._closing.discard(sym)
 
@@ -419,7 +476,6 @@ class Orchestrator:
             return f"Leverage set: {symbol} x{leverage}"
         else:
             self.risk.set_global_leverage(leverage)
-            # Parallel: all 20 symbols at once instead of serial awaits
             await asyncio.gather(
                 *[self.exec.set_leverage(sym, leverage) for sym in SYMBOL_INFO],
                 return_exceptions=True,
@@ -441,8 +497,10 @@ class Orchestrator:
                 c = buf.live or (buf.closed[-1] if buf.closed else None)
                 if c:
                     cur = c.close
-            await self.exec.cancel_all_orders(symbol)
-            await self.exec.place_market_order(symbol, close_side, pos.qty, reduce_only=True)
+            r = await self.exec.place_market_order(
+                symbol, close_side, pos.qty, reduce_only=True)
+            if not r.get("orderId"):
+                return f"Market order failed for {symbol}"
             pnl = self.risk.close_position(symbol, cur, "force_close")
             msg = f"Force closed {symbol} pnl={pnl:+.4f} USDT"
             self._log("ok" if pnl >= 0 else "warn", msg)
@@ -468,8 +526,10 @@ class Orchestrator:
     def snapshot(self) -> dict:
         signals = {
             sym: {"score": s.score, "direction": s.direction,
-                  "agents": {"momentum": s.momentum_score, "orderflow": s.orderflow_score,
-                              "funding": s.funding_score, "liquidation": s.liquidation_score}}
+                  "agents": {"momentum": s.momentum_score,
+                             "orderflow": s.orderflow_score,
+                             "funding":   s.funding_score,
+                             "liquidation": s.liquidation_score}}
             for sym, s in self._last_signals.items()
         }
         positions = {}
@@ -478,12 +538,15 @@ class Orchestrator:
             c = (buf.live or (buf.closed[-1] if buf.closed else None)) if buf else None
             cur = round(c.close, 6) if c else p.entry_price
             sig = self._last_signals.get(sym)
-            rr = abs(p.tp1 - p.entry_price) / max(abs(p.stop_loss - p.entry_price), 0.0001)
+            sl_dist = abs(p.stop_loss - p.entry_price)
+            tp1_dist = abs(p.tp1 - p.entry_price)
+            rr = tp1_dist / sl_dist if sl_dist > 0 else 0
+            _, _, pp = SYMBOL_INFO.get(sym, (1.0, 1.0, 4))
             positions[sym] = {
                 "direction": p.direction, "entry": p.entry_price, "current": cur,
                 "qty": p.qty, "sl": p.stop_loss,
                 "tp1": p.tp1, "tp2": p.tp2, "tp3": p.tp3,
-                "tp1_hit": p.tp1_hit, "tp2_hit": p.tp2_hit,
+                "tp1_hit": p.tp1_hit, "tp2_hit": p.tp2_hit, "tp3_hit": p.tp3_hit,
                 "pnl": round(p.pnl, 4), "score": sig.score if sig else 0,
                 "leverage": p.leverage,
                 "margin": round(p.qty * p.entry_price / p.leverage, 2),
@@ -492,27 +555,30 @@ class Orchestrator:
 
         uptime_s = int(time.time() - self._start_time)
         h, m, s = uptime_s // 3600, (uptime_s % 3600) // 60, uptime_s % 60
-        best = max(self._last_signals.values(), key=lambda x: x.score) if self._last_signals else None
+        best = (max(self._last_signals.values(), key=lambda x: x.score)
+                if self._last_signals else None)
 
         return {
-            "balance":          round(self.risk.state.current_balance, 2),
-            "total_equity":     round(self.risk.state.total_equity, 2),
-            "unrealized_pnl":   round(self.risk.state.unrealized_pnl, 4),
-            "daily_pnl":        self.daily_pnl(),
-            "drawdown_pct":     round(self.risk.state.drawdown_pct, 2),
-            "wins":             self._wins,
-            "losses":           self._losses,
-            "open_positions":   positions,
-            "last_signals":     signals,
-            "live_prices":      self._live_prices(),
-            "equity_history":   list(self._equity_history),
-            "leverage_map":     {k: v for k, v in self.risk.leverage_map.items()},
-            "global_leverage":  settings.default_leverage,
+            "balance":        round(self.risk.state.current_balance, 2),
+            "total_equity":   round(self.risk.state.total_equity, 2),
+            "unrealized_pnl": round(self.risk.state.unrealized_pnl, 4),
+            "daily_pnl":      self.daily_pnl(),
+            "drawdown_pct":   round(self.risk.state.drawdown_pct, 2),
+            "wins":           self._wins,
+            "losses":         self._losses,
+            "open_positions": positions,
+            "last_signals":   signals,
+            "live_prices":    self._live_prices(),
+            "equity_history": list(self._equity_history),
+            "leverage_map":   {k: v for k, v in self.risk.leverage_map.items()},
+            "global_leverage": settings.default_leverage,
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {
                 "symbol": best.symbol, "score": best.score, "direction": best.direction,
-                "agents": {"momentum": best.momentum_score, "orderflow": best.orderflow_score,
-                           "funding": best.funding_score, "liquidation": best.liquidation_score},
+                "agents": {"momentum": best.momentum_score,
+                           "orderflow": best.orderflow_score,
+                           "funding":   best.funding_score,
+                           "liquidation": best.liquidation_score},
             } if best else None,
         }
