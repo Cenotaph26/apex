@@ -141,18 +141,25 @@ class ExecutionEngine:
             return 1000.0
 
     # ── Leverage ──────────────────────────────────────────────
-    async def set_leverage(self, symbol: str, leverage: int) -> bool:
+    async def set_leverage(self, symbol: str, leverage: int) -> int:
+        """Set leverage with automatic fallback. Returns actual leverage set."""
         if self._dry_run or not settings.is_futures_demo:
-            return True
-        try:
-            r = await self._post("/fapi/v1/leverage",
-                                 {"symbol": symbol, "leverage": leverage})
-            log.info("Leverage: %s x%d (maxNotional=%s)",
-                     symbol, r.get("leverage"), r.get("maxNotionalValue", "?"))
-            return True
-        except Exception as e:
-            log.warning("Leverage failed %s x%d: %s", symbol, leverage, e)
-            return False
+            return leverage
+        # Try requested leverage, fall back to lower values if rejected
+        for lev in sorted({leverage, min(leverage, 10), 5, 3, 2, 1}, reverse=True):
+            if lev > leverage:
+                continue
+            try:
+                r = await self._post("/fapi/v1/leverage",
+                                     {"symbol": symbol, "leverage": lev})
+                actual = int(r.get("leverage", lev))
+                log.info("Leverage: %s x%d (maxNotional=%s)",
+                         symbol, actual, r.get("maxNotionalValue", "?"))
+                return actual
+            except Exception as e:
+                log.warning("Leverage x%d failed for %s: %s — trying lower", lev, symbol, e)
+        log.error("All leverage attempts failed for %s", symbol)
+        return 1
 
     # ── Open positions from exchange ──────────────────────────
     async def get_open_positions(self) -> list[dict]:
@@ -171,6 +178,12 @@ class ExecutionEngine:
         if self._dry_run:
             log.info("[DRY] MARKET %s %s %.4f reduceOnly=%s", side, symbol, qty, reduce_only)
             return {"orderId": f"dry_{int(time.time())}", "status": "FILLED", "avgPrice": "0"}
+
+        # Round qty to avoid precision errors
+        qty = float(f"{qty:.8g}")
+        if qty <= 0:
+            log.error("place_market_order: qty=0 for %s, skipping", symbol)
+            return {}
 
         if settings.is_futures_demo:
             params: dict = {"symbol": symbol, "side": side,

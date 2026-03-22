@@ -283,6 +283,11 @@ class Orchestrator:
             if sig.symbol in self._opening or sig.symbol in self.risk.state.positions:
                 return
 
+            # Skip non-ASCII symbols (e.g. Chinese characters in testnet)
+            if not sig.symbol.isascii():
+                self._log("warn", f"Skipping non-ASCII symbol: {sig.symbol}")
+                return
+
             ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers)
             if not ok:
                 self._log("info", f"trade blocked [{sig.symbol}]: {reason}")
@@ -309,8 +314,12 @@ class Orchestrator:
             tp2 = entry_price * (1 + pct * settings.tp2_pct / 100)
             tp3 = entry_price * (1 + pct * settings.tp3_pct / 100)
 
-            # 1. Set leverage on exchange
-            await self.exec.set_leverage(sig.symbol, leverage)
+            # 1. Set leverage (returns actual leverage, may be lower if symbol has max)
+            actual_lev = await self.exec.set_leverage(sig.symbol, leverage)
+            if actual_lev != leverage:
+                leverage = actual_lev
+                self._log("info",
+                    f"Leverage adjusted: {sig.symbol} x{leverage} (requested x{leverage})")
 
             entry_side = "BUY" if sig.direction == "long" else "SELL"
 
@@ -450,18 +459,19 @@ class Orchestrator:
                 elif tp2_hit:
                     self._closing.add(sym)
                     try:
-                        close_qty = max(_round_step(pos.qty * TP2_CLOSE_PCT, step), step)
+                        # TP2: close ALL remaining qty (position fully closed here)
+                        close_qty = pos.qty
                         self._log("ok",
                             f"TP2 hit: {sym} @ {price:.{pp}f} "
-                            f"— closing {close_qty} lots ({TP2_CLOSE_PCT*100:.0f}% of remaining)")
+                            f"— closing ALL remaining {close_qty} lots")
                         r = await self.exec.place_market_order(
                             sym, close_side, close_qty, reduce_only=True)
                         if r.get("orderId"):
                             pos.tp2_hit = True
-                            remaining = max(_round_step(pos.qty - close_qty, step), step)
-                            pos.qty = remaining
+                            pnl = self.risk.close_position(sym, price, "TP2")
+                            self._wins += 1
                             self._log("ok",
-                                f"TP2 partial closed: {sym} | remaining qty={remaining}")
+                                f"Closed {sym} TP2 pnl={pnl:+.4f} USDT — full position closed")
                         else:
                             self._log("err",
                                 f"TP2 market order FAILED for {sym}")
