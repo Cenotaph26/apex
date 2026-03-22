@@ -32,7 +32,7 @@ log = logging.getLogger("apex.coin_filter")
 
 # ── Filtre parametreleri ──────────────────────────────────────────────────────
 MIN_VOLUME_USDT  = 50_000_000    # 24h USDT hacmi ≥ 50M (ATR filtresi kaliteyi sağlar)
-MIN_ATR_PCT      = 0.15          # Son 4 saatlik ATR ≥ %0.15 (fırsat eşiği)
+MIN_ATR_PCT      = 0.08          # Son 4 saatlik ATR ≥ %0.08 (BTC~%0.10 geçebilsin)
 MAX_ATR_PCT      = 2.00          # Son 4 saatlik ATR ≤ %2.00 (aşırı volatilite)
 FILTER_TTL_SEC   = 3600          # Filtre sonuçlarını 1 saat cache'le
 ATR_BARS         = 240           # 4 saat = 240 × 1m bar
@@ -81,7 +81,7 @@ class CoinFilter:
     def __init__(
         self,
         min_volume: float = MIN_VOLUME_USDT,  # 50M
-        min_atr_pct: float = MIN_ATR_PCT,
+        min_atr_pct: float = MIN_ATR_PCT,  # 0.08
         max_atr_pct: float = MAX_ATR_PCT,
         ttl_sec: float = FILTER_TTL_SEC,
     ):

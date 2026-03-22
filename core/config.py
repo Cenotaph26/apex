@@ -2,7 +2,7 @@
 Configuration v5 — all values from environment variables.
 
 Changes vs v4:
-- atr_sl_multiplier: 1.5 → 2.0  (SL too tight, frequent stop-outs)
+- atr_sl_multiplier: 1.5 → 2.5  (v6: daha geniş SL, erken tetiklenme azalır)
 - watchlist: defaults to AUTO — discovered from Binance Futures at startup
 - max_open_positions: now runtime-settable via API (no restart needed)
 - score_threshold: now runtime-settable via API (no restart needed)
@@ -40,7 +40,7 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "75"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "70"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
     loop_interval_sec:  float = float(os.getenv("LOOP_INTERVAL_SEC",  "60"))
     max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "3"))
@@ -62,12 +62,12 @@ class Settings:
     momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT","0.15"))
 
     # ── TP / SL ───────────────────────────────────────────────
-    tp1_pct:           float = float(os.getenv("TP1_PCT",           "0.8"))
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.6"))
-    tp3_pct:           float = float(os.getenv("TP3_PCT",           "2.8"))
+    tp1_pct:           float = float(os.getenv("TP1_PCT",           "0.6"))
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.3"))
+    tp3_pct:           float = float(os.getenv("TP3_PCT",           "2.2"))
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
-    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.0"))
+    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.5"))
 
     # ── Watchlist ön filtresi ────────────────────────────────
     # Binance'tan çekilen tüm coinlere uygulanır.
