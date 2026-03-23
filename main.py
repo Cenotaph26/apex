@@ -90,30 +90,31 @@ async def state():
 
 @app.get("/trades")
 async def get_trades(n: int = 100):
-    """Return last N trades as JSON."""
-    if orchestrator is None:
-        return []
-    return orchestrator._trade_logger.get_recent(n)
-
-
-@app.get("/trades/stats")
-async def trade_stats():
-    """Return session trade statistics."""
-    if orchestrator is None:
-        return {}
-    return orchestrator._trade_logger.get_stats()
+    """Return last N trades as JSON (from Redis or file)."""
+    from core.storage import storage
+    return storage.get_trades(n)
 
 
 @app.get("/trades/csv")
 async def trades_csv():
-    """Return trades CSV file."""
-    import os
-    from fastapi.responses import FileResponse
-    path = os.path.join(os.getenv("DATA_DIR", "/data"), "trades.csv")
-    if os.path.exists(path):
-        return FileResponse(path, media_type="text/csv",
-                           filename="apex_trades.csv")
+    """Return trades as CSV (from Redis or file)."""
+    from fastapi.responses import Response
+    from core.storage import storage
+    data = storage.get_csv_bytes()
+    if data:
+        return Response(
+            content=data,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=apex_trades.csv"}
+        )
     return {"error": "No trade log yet"}
+
+
+@app.get("/trades/stats")
+async def trades_stats_storage():
+    """Live trade stats from Redis/CSV."""
+    from core.storage import storage
+    return storage.get_stats()
 
 
 # ── Control endpoints ─────────────────────────────────────────────────────────
@@ -123,6 +124,9 @@ async def set_leverage(symbol: str | None = None, leverage: int = 1):
     if orchestrator is None:
         return {"error": "not ready"}
     msg = await orchestrator.set_leverage(symbol, leverage)
+    # Redis'e kaydet (restart sonrası korunur)
+    from core.storage import storage
+    storage.save_config("default_leverage", leverage)
     return {"ok": True, "msg": msg}
 
 
@@ -141,6 +145,8 @@ async def set_trail(mode: str = "none"):
     if mode not in valid:
         return {"error": f"Invalid mode. Valid: {valid}"}
     settings.trail_mode = mode
+    from core.storage import storage
+    storage.save_config("trail_mode", mode)
     return {"ok": True, "msg": f"Trail mode set: {mode}"}
 
 

@@ -1,5 +1,6 @@
 """
-TradeLogger — Her işlemi CSV ve JSON olarak kaydeder.
+TradeLogger — Her işlemi Redis (veya CSV) olarak kaydeder.
+Storage modülü üzerinden Redis öncelikli çalışır.
 
 CSV kolonları:
   timestamp, symbol, direction, entry_price, exit_price, qty,
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger("apex.trade_logger")
+from core.storage import storage
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 CSV_PATH  = os.path.join(DATA_DIR, "trades.csv")
@@ -116,12 +118,8 @@ class TradeLogger:
             "session_drawdown_pct": f"{record.session_drawdown_pct:.2f}",
         }
 
-        # Append to CSV
-        try:
-            with open(CSV_PATH, "a", newline="") as f:
-                csv.DictWriter(f, fieldnames=CSV_HEADERS).writerow(row)
-        except Exception as e:
-            log.error("CSV write failed: %s", e)
+        # Persist to Redis or CSV via storage
+        storage.append_trade(row)
 
         # Update in-memory list
         self._trades.append(row)
@@ -149,43 +147,24 @@ class TradeLogger:
                  record.pnl_usdt, record.exit_reason)
 
     def update_session(self, balance: float, drawdown_pct: float):
-        """Update session summary file."""
-        total = self._session_wins + self._session_losses
-        wr = self._session_wins / total * 100 if total > 0 else 0
-        pf = (self._session_gross_profit / self._session_gross_loss
-              if self._session_gross_loss > 0 else 0)
-
+        """Session özetini Redis/dosyaya yaz."""
+        stats = storage.get_stats()
         session = {
-            "session_start":     self._session_start,
-            "updated_at":        datetime.now(timezone.utc).isoformat(),
-            "balance":           round(balance, 2),
-            "drawdown_pct":      round(drawdown_pct, 2),
-            "total_trades":      total,
-            "wins":              self._session_wins,
-            "losses":            self._session_losses,
-            "win_rate_pct":      round(wr, 1),
-            "gross_profit":      round(self._session_gross_profit, 2),
-            "gross_loss":        round(self._session_gross_loss, 2),
-            "net_pnl":           round(self._session_gross_profit - self._session_gross_loss, 2),
-            "profit_factor":     round(pf, 2),
-            "last_trades":       self._trades[-10:],
+            "session_start":  self._session_start,
+            "updated_at":     datetime.now(timezone.utc).isoformat(),
+            "balance":        round(balance, 2),
+            "drawdown_pct":   round(drawdown_pct, 2),
+            **stats,
         }
-        try:
-            with open(SESSION_PATH, "w") as f:
-                json.dump(session, f, indent=2)
-        except Exception as e:
-            log.error("Session write failed: %s", e)
+        storage.save_session(session)
 
     def get_recent(self, n: int = 50) -> list[dict]:
         return self._trades[-n:]
 
     def get_stats(self) -> dict:
-        total = self._session_wins + self._session_losses
-        return {
-            "total":    total,
-            "wins":     self._session_wins,
-            "losses":   self._session_losses,
-            "wr_pct":   round(self._session_wins / total * 100, 1) if total > 0 else 0,
-            "gross_profit": round(self._session_gross_profit, 2),
-            "gross_loss":   round(self._session_gross_loss, 2),
-        }
+        """Redis/CSV'den gerçek zamanlı stats döner."""
+        return storage.get_stats()
+
+    def get_recent(self, n: int = 50) -> list[dict]:
+        """Redis/CSV'den son N trade döner (override)."""
+        return storage.get_trades(n)

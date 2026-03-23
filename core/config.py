@@ -42,6 +42,32 @@ class Settings:
     # ── Orchestrator (runtime-mutable) ────────────────────────
     score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "65"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
+
+    def load_from_redis(self):
+        """Restart sonrası Redis'ten kaydedilmiş runtime ayarları yükle."""
+        try:
+            from core.storage import storage
+            saved = storage.get_all_config()
+            if not saved:
+                return
+            for key, attr, typ in [
+                ("score_threshold",    "score_threshold",    float),
+                ("max_open_positions", "max_open_positions", int),
+                ("atr_sl_multiplier",  "atr_sl_multiplier",  float),
+                ("trail_mode",         "trail_mode",         str),
+                ("default_leverage",   "default_leverage",   int),
+                ("tp1_pct",            "tp1_pct",            float),
+                ("tp2_pct",            "tp2_pct",            float),
+                ("tp3_pct",            "tp3_pct",            float),
+            ]:
+                if key in saved and hasattr(self, attr):
+                    setattr(self, attr, typ(saved[key]))
+            import logging
+            logging.getLogger("apex.config").info(
+                "Redis config yüklendi: %d ayar", len(saved))
+        except Exception as e:
+            import logging
+            logging.getLogger("apex.config").warning("Redis config: %s", e)
     loop_interval_sec:  float = float(os.getenv("LOOP_INTERVAL_SEC",  "60"))
     max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "2"))
 

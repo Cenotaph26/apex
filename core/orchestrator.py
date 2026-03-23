@@ -116,6 +116,8 @@ class Orchestrator:
     # ── Lifecycle ─────────────────────────────────────────────
     async def run(self):
         self._running = True
+        # Redis'ten önceki session'da kaydedilmiş ayarları yükle
+        settings.load_from_redis()
         await self.exec._sync_time()
 
         balance = await self.exec.get_balance()
