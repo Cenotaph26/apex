@@ -134,6 +134,16 @@ async def force_close(symbol: str):
     return {"ok": True, "msg": msg}
 
 
+@app.post("/control/trail")
+async def set_trail(mode: str = "none"):
+    """Set trailing stop mode: none | breakeven | tp1 | atr_trail"""
+    valid = {"none", "breakeven", "tp1", "atr_trail"}
+    if mode not in valid:
+        return {"error": f"Invalid mode. Valid: {valid}"}
+    settings.trail_mode = mode
+    return {"ok": True, "msg": f"Trail mode set: {mode}"}
+
+
 @app.post("/control/pause")
 async def pause():
     if orchestrator is None:

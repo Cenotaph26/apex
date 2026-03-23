@@ -40,16 +40,17 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "68"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "65"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
     loop_interval_sec:  float = float(os.getenv("LOOP_INTERVAL_SEC",  "60"))
-    max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "3"))
+    max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "2"))
 
     # ── Risk ──────────────────────────────────────────────────
     risk_per_trade_pct:     float = float(os.getenv("RISK_PER_TRADE_PCT",    "1.5"))
     max_drawdown_pct:       float = float(os.getenv("MAX_DRAWDOWN_PCT",      "8.0"))
     max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT","6.0"))
-    correlation_threshold:  float = float(os.getenv("CORRELATION_THRESHOLD", "0.85"))
+    correlation_threshold:  float = float(os.getenv("CORRELATION_THRESHOLD", "0.75"))
+    trail_mode:             str   = os.getenv("TRAIL_MODE", "none")   # none|breakeven|tp1|atr_trail — backtest: none best PnL
 
     # ── Agent weights ─────────────────────────────────────────
     weight_momentum:    float = float(os.getenv("WEIGHT_MOMENTUM",    "0.35"))
@@ -62,12 +63,12 @@ class Settings:
     momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT","0.20"))
 
     # ── TP / SL ───────────────────────────────────────────────
-    tp1_pct:           float = float(os.getenv("TP1_PCT",           "0.8"))
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.6"))
-    tp3_pct:           float = float(os.getenv("TP3_PCT",           "2.8"))
+    tp1_pct:           float = float(os.getenv("TP1_PCT",           "1.0"))
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "2.0"))
+    tp3_pct:           float = float(os.getenv("TP3_PCT",           "3.5"))
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
-    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.5"))
+    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "3.0"))
 
     # ── Watchlist ön filtresi ────────────────────────────────
     # Binance'tan çekilen tüm coinlere uygulanır.

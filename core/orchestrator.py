@@ -29,6 +29,18 @@ from core.config import settings
 from core.feed import FeedManager
 from core.models import CandleBuffer
 from core.risk import RiskManager, Position, SYMBOL_INFO, _round_step
+import statistics as _statistics
+
+def atr(bars, n=14):
+    """Simple ATR for trailing stop calculation (Candle objects)."""
+    if len(bars) < 2: return 0.0
+    trs = []
+    for i in range(1, min(len(bars), n+1)):
+        c, p = bars[-i], bars[-i-1]
+        trs.append(max(c.high - c.low,
+                       abs(c.high - p.close),
+                       abs(c.low  - p.close)))
+    return _statistics.mean(trs) if trs else 0.0
 from core.execution import ExecutionEngine
 from agents.momentum import MomentumSniper
 from agents.orderflow import OrderFlowAgent
@@ -43,7 +55,7 @@ MAX_LOG_LINES  = 60
 MAX_EQUITY_PTS = 120
 
 # What fraction of the original position to close at each TP level
-TP1_CLOSE_PCT = 0.50   # close 50% at TP1
+TP1_CLOSE_PCT = 0.25   # close 25% at TP1 (backtest: higher PF with 25%)
 TP2_CLOSE_PCT = 0.50   # close 50% of remaining (= 25% of original) at TP2
 # TP3 closes everything left
 
@@ -498,11 +510,32 @@ class Orchestrator:
                             pos.tp1_hit = True
                             remaining = max(_round_step(pos.qty - close_qty, step), step)
                             pos.qty = remaining
-                            # Move SL to breakeven
-                            pos.stop_loss = pos.entry_price
-                            self._log("ok",
-                                f"SL moved to breakeven: {sym} @ {pos.entry_price:.{pp}f} "
-                                f"| remaining qty={remaining}")
+
+                            # Trailing stop mode (backtest: 'none' outperforms 'breakeven')
+                            trail = getattr(settings, 'trail_mode', 'none')
+                            if trail == "breakeven":
+                                pos.stop_loss = pos.entry_price
+                                self._log("ok",
+                                    f"TP1 hit {sym} @ {price:.{pp}f} | SL→breakeven"
+                                    f" | remaining={remaining}")
+                            elif trail == "tp1":
+                                pos.stop_loss = pos.tp1
+                                self._log("ok",
+                                    f"TP1 hit {sym} @ {price:.{pp}f} | SL→TP1={pos.tp1:.{pp}f}"
+                                    f" | remaining={remaining}")
+                            elif trail == "atr_trail":
+                                _a = atr(list(self.feed.buffers[sym].closed)) if sym in self.feed.buffers else 0
+                                if pos.direction == "long":
+                                    pos.stop_loss = max(pos.entry_price, price - _a * 1.5)
+                                else:
+                                    pos.stop_loss = min(pos.entry_price, price + _a * 1.5)
+                                self._log("ok",
+                                    f"TP1 hit {sym} @ {price:.{pp}f} | SL→ATR trail"
+                                    f" | remaining={remaining}")
+                            else:  # "none" — keep original SL (backtest winner)
+                                self._log("ok",
+                                    f"TP1 hit {sym} @ {price:.{pp}f} | SL unchanged"
+                                    f" | remaining={remaining}")
                         else:
                             self._log("err",
                                 f"TP1 market order FAILED for {sym} — retrying next tick")
