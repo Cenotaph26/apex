@@ -149,6 +149,29 @@ body{padding:12px;overflow-y:auto}
 .rk{font-size:10px;color:var(--g1)}.rv{font-size:10px;color:var(--w)}
 .rv.ok{color:var(--green)}.rv.warn{color:var(--yel)}.rv.hot{color:var(--or2)}
 
+/* TRADE LOG */
+.trade-section{padding:9px 12px;display:flex;flex-direction:column;gap:8px}
+.trade-btn-row{display:flex;gap:6px;flex-wrap:wrap}
+.trade-btn{font-size:10px;padding:5px 12px;border-radius:3px;cursor:pointer;
+  transition:all .15s;font-family:var(--mono);white-space:nowrap}
+.trade-btn.dl{border:0.5px solid var(--or);background:var(--ordim);color:var(--or2)}
+.trade-btn.dl:hover{background:var(--or);color:#000}
+.trade-btn.sec{border:0.5px solid var(--b2);background:var(--bg3);color:var(--g1)}
+.trade-btn.sec:hover{border-color:var(--or);color:var(--or2)}
+.trade-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:2px}
+.tsk{font-size:8px;color:var(--g2);text-transform:uppercase;letter-spacing:.5px}
+.tsv{font-size:12px;font-weight:500;margin-top:2px}
+.trade-table-wrap{max-height:180px;overflow-y:auto;margin-top:4px}
+.trade-table{width:100%;border-collapse:collapse;font-size:9px}
+.trade-table th{color:var(--g2);font-weight:400;text-align:center;
+  padding:3px 4px;border-bottom:0.5px solid var(--b);position:sticky;top:0;
+  background:var(--bg2)}
+.trade-table td{text-align:center;padding:3px 4px;border-bottom:0.5px solid var(--b);
+  color:var(--w)}
+.trade-table tr:hover td{background:var(--bg3)}
+.tr-win{color:var(--green)!important;font-weight:500}
+.tr-los{color:var(--red)!important;font-weight:500}
+
 /* CONTROL PANEL */
 .ctrl-panel{padding:11px 12px;display:flex;flex-direction:column;gap:10px}
 .ctrl-section{display:flex;flex-direction:column;gap:6px}
@@ -367,8 +390,64 @@ body{padding:12px;overflow-y:auto}
       </div>
     </div>
 
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Trailing Stop</div>
+      <div class="lev-grid" style="grid-template-columns:repeat(4,1fr)">
+        <div class="lev-preset" onclick="setTrail('none')">Yok</div>
+        <div class="lev-preset" onclick="setTrail('breakeven')">BE</div>
+        <div class="lev-preset" onclick="setTrail('tp1')">TP1</div>
+        <div class="lev-preset" onclick="setTrail('atr_trail')">ATR</div>
+      </div>
+    </div>
+
     <div class="feedback" id="ctrl-feedback">—</div>
 
+  </div>
+</div>
+
+<!-- TRADE LOG -->
+<div class="card s2">
+  <div class="chdr">
+    <div class="ctitle">trade log</div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span class="badge bgy" id="trade-count">0 işlem</span>
+      <div class="badge bor" id="trade-wr">—</div>
+    </div>
+  </div>
+  <div class="trade-section">
+    <div class="trade-stats">
+      <div>
+        <div class="tsk">Net PnL</div>
+        <div class="tsv" id="ts-pnl" style="color:var(--or2)">—</div>
+      </div>
+      <div>
+        <div class="tsk">Kazanç / Kayıp</div>
+        <div class="tsv" id="ts-wl">—</div>
+      </div>
+      <div>
+        <div class="tsk">Profit Factor</div>
+        <div class="tsv" id="ts-pf">—</div>
+      </div>
+    </div>
+    <div class="trade-btn-row">
+      <button class="trade-btn dl" onclick="downloadCSV()">⬇ CSV İndir</button>
+      <button class="trade-btn sec" onclick="loadTrades()">↻ Yenile</button>
+      <button class="trade-btn sec" onclick="clearTradeTable()">✕ Temizle</button>
+    </div>
+    <div class="trade-table-wrap" id="trade-table-wrap" style="display:none">
+      <table class="trade-table">
+        <thead>
+          <tr>
+            <th>Zaman</th><th>Sembol</th><th>Yön</th>
+            <th>Giriş</th><th>Çıkış</th><th>Neden</th>
+            <th>Tutuş</th><th>PnL</th><th>%</th>
+          </tr>
+        </thead>
+        <tbody id="trade-tbody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -501,6 +580,54 @@ function renderOrch(best){
 }
 
 function applyState(d){
+  // Auto-refresh trade stats if there are completed trades
+  if(d.trade_stats && d.trade_stats.total > 0){
+    const stats=d.trade_stats;
+    const count=$('trade-count');
+    if(count) count.textContent=stats.total+' işlem';
+    const wr=$('trade-wr');
+    if(wr){
+      const w=stats.wr_pct||0;
+      wr.textContent='WR '+w.toFixed(1)+'%';
+      wr.className='badge '+(w>=50?'bgr':w>=40?'byel':'bred');
+    }
+    const pnl=(stats.gross_profit||0)-(stats.gross_loss||0);
+    set('ts-pnl',(pnl>=0?'+':'')+pnl.toFixed(2)+' USDT');
+    const pnlEl=$('ts-pnl');
+    if(pnlEl) pnlEl.style.color=pnl>=0?'var(--green)':'var(--red)';
+    set('ts-wl',stats.wins+'W / '+stats.losses+'L');
+    const pf=stats.gross_loss>0?(stats.gross_profit/stats.gross_loss):0;
+    set('ts-pf',pf.toFixed(2));
+  }
+
+  // Update recent trades table from snapshot
+  if(d.recent_trades && d.recent_trades.length>0){
+    const tbody=$('trade-tbody');
+    const wrap=$('trade-table-wrap');
+    if(tbody && tbody.children.length===0){
+      tbody.innerHTML=d.recent_trades.slice().reverse().slice(0,20).map(t=>{
+        const pnl=parseFloat(t.pnl_usdt)||0;
+        const cls=pnl>=0?'tr-win':'tr-los';
+        const sym=(t.symbol||'').replace('USDT','');
+        const dir=t.direction==='long'?
+          '<span style="color:var(--green)">L</span>':
+          '<span style="color:var(--red)">S</span>';
+        return '<tr>'
+          +'<td>'+(t.timestamp||'').slice(11,19)+'</td>'
+          +'<td>'+sym+'</td>'+'<td>'+dir+'</td>'
+          +'<td>'+parseFloat(t.entry_price||0).toFixed(4)+'</td>'
+          +'<td>'+parseFloat(t.exit_price||0).toFixed(4)+'</td>'
+          +'<td style="color:var(--g1)">'+(t.exit_reason||'')+'</td>'
+          +'<td style="color:var(--g2)">'+(t.hold_time_min||0)+'m</td>'
+          +'<td class="'+cls+'">'+pnl.toFixed(2)+'</td>'
+          +'<td class="'+cls+'">'+(t.pnl_pct||0)+'%</td>'
+          +'</tr>';
+      }).join('');
+      if(wrap) wrap.style.display='block';
+    }
+  }
+
+  if(!d||!d.balance)return;
   if(!d||d.balance===undefined)return;
   set('uptime',d.uptime||'—');
   var now=new Date();
@@ -582,6 +709,99 @@ function feedback(msg,ok){
   if(!el)return;
   el.textContent=msg;
   el.style.color=ok===false?'var(--red)':'var(--green)';
+}
+
+async function setTrail(mode){
+  const labels={'none':'Yok','breakeven':'BE','tp1':'TP1','atr_trail':'ATR'};
+  try{
+    const r=await fetch('/control/trail?mode='+mode,{method:'POST'});
+    const d=await r.json();
+    feedback(d.msg||'Trail: '+mode, d.ok);
+    document.querySelectorAll('.ctrl-section .lev-preset').forEach(b=>{
+      if(Object.keys(labels).includes(b.onclick?.toString().match(/'(\w+)'/)?.[1])){
+        b.classList.remove('active');
+      }
+    });
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function downloadCSV(){
+  feedback('CSV indiriliyor...', true);
+  try{
+    const r=await fetch('/trades/csv');
+    if(!r.ok){feedback('Trade log henüz yok',false);return;}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='apex_trades_'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    feedback('CSV indirildi ✓', true);
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function loadTrades(){
+  try{
+    const [trR, stR]=await Promise.all([
+      fetch('/trades?n=50'), fetch('/trades/stats')
+    ]);
+    const trades=await trR.json();
+    const stats=await stR.json();
+
+    // Update stats
+    const count=$('trade-count');
+    if(count) count.textContent=(stats.total||0)+' işlem';
+    const wr=$('trade-wr');
+    if(wr){
+      const w=stats.wr_pct||0;
+      wr.textContent='WR '+w.toFixed(1)+'%';
+      wr.className='badge '+(w>=50?'bgr':w>=40?'byel':'bred');
+    }
+    const pnl=(stats.gross_profit||0)-(stats.gross_loss||0);
+    set('ts-pnl',(pnl>=0?'+':'')+pnl.toFixed(2)+' USDT');
+    const pnlEl=$('ts-pnl');
+    if(pnlEl) pnlEl.style.color=pnl>=0?'var(--green)':'var(--red)';
+    set('ts-wl',(stats.wins||0)+'W / '+(stats.losses||0)+'L');
+    const pf=stats.gross_loss>0?(stats.gross_profit/stats.gross_loss):0;
+    set('ts-pf',pf.toFixed(2));
+
+    // Render table
+    if(trades && trades.length>0){
+      const tbody=$('trade-tbody');
+      const wrap=$('trade-table-wrap');
+      if(tbody){
+        tbody.innerHTML=trades.slice().reverse().map(t=>{
+          const pnl=parseFloat(t.pnl_usdt)||0;
+          const cls=pnl>=0?'tr-win':'tr-los';
+          const sym=(t.symbol||'').replace('USDT','');
+          const dir=t.direction==='long'?
+            '<span style="color:var(--green)">LONG</span>':
+            '<span style="color:var(--red)">SHORT</span>';
+          return '<tr>'
+            +'<td>'+( t.timestamp||'').slice(11,19)+'</td>'
+            +'<td>'+sym+'</td>'
+            +'<td>'+dir+'</td>'
+            +'<td>'+parseFloat(t.entry_price||0).toFixed(4)+'</td>'
+            +'<td>'+parseFloat(t.exit_price||0).toFixed(4)+'</td>'
+            +'<td style="color:var(--g1)">'+( t.exit_reason||'')+'</td>'
+            +'<td style="color:var(--g2)">'+( t.hold_time_min||0)+'m</td>'
+            +'<td class="'+cls+'">'+pnl.toFixed(2)+'</td>'
+            +'<td class="'+cls+'">'+(t.pnl_pct||0)+'%</td>'
+            +'</tr>';
+        }).join('');
+      }
+      if(wrap) wrap.style.display='block';
+    }
+  }catch(e){console.error('Trade load error:',e);}
+}
+
+function clearTradeTable(){
+  const wrap=$('trade-table-wrap');
+  if(wrap) wrap.style.display='none';
+  const tbody=$('trade-tbody');
+  if(tbody) tbody.innerHTML='';
+  set('trade-count','0 işlem');
 }
 
 async function applyLeverage(){
