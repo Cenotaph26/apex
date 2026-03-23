@@ -243,7 +243,7 @@ body{padding:12px;overflow-y:auto}
   <div class="mc"><div class="mlbl">Win rate</div>
     <div class="mval" id="m-wr">—</div><div class="msub" id="m-wl">—</div></div>
   <div class="mc"><div class="mlbl">Open pos.</div>
-    <div class="mval or" id="m-pos">—</div><div class="msub">max 3</div></div>
+    <div class="mval or" id="m-pos">—</div><div class="msub" id="m-pos-max">max —</div></div>
   <div class="mc"><div class="mlbl">Drawdown</div>
     <div class="mval" id="m-dd">—</div><div class="msub">limit 8%</div></div>
 </div>
@@ -460,7 +460,7 @@ body{padding:12px;overflow-y:auto}
     <div class="rrow"><span class="rk">drawdown</span><span class="rv ok" id="rk-dd">0.0%</span></div>
     <div class="rrow"><span class="rk">circuit breaker</span><span class="rv ok" id="rk-cb">OFF</span></div>
     <div class="rrow"><span class="rk">correlation filter</span><span class="rv ok">PASS</span></div>
-    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / 3</span></div>
+    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / —</span></div>
     <div class="rrow"><span class="rk">global leverage</span><span class="rv hot" id="rk-lev">x1</span></div>
     <div class="rrow"><span class="rk">wins / losses</span><span class="rv" id="rk-wl">—</span></div>
     <div class="rrow"><span class="rk">uptime</span><span class="rv" id="rk-up">—</span></div>
@@ -647,7 +647,9 @@ function applyState(d){
   set('rk-dd',dd.toFixed(1)+'%');
   var rdd=$('rk-dd');if(rdd)rdd.className='rv '+(dd>=5?'warn':dd>=3?'hot':'ok');
   set('rk-cb',dd.toFixed(1)+'% — '+(dd>=8?'ON':'OFF'));
-  set('rk-om',pos+' / 3');
+  var maxPos = d.max_open_positions || 3;
+  set('rk-om', pos + ' / ' + maxPos);
+  set('m-pos-max', 'max ' + maxPos);
   set('rk-wl',(d.wins||0)+' / '+(d.losses||0));
   set('rk-up',d.uptime||'—');
   set('rk-lev','x'+(d.global_leverage||1));

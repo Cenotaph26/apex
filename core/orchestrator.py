@@ -708,7 +708,8 @@ class Orchestrator:
                 f"vol≥{settings.min_volume_usdt/1e6:.0f}M "
                 f"atr:{settings.min_atr_pct:.2f}%-{settings.max_atr_pct:.2f}%"
             ),
-            "coin_filter_stats": self._coin_filter.stats(),
+            "coin_filter_stats":   self._coin_filter.stats(),
+            "max_open_positions":  settings.max_open_positions,
             "trade_stats":        self._trade_logger.get_stats(),
             "recent_trades":      self._trade_logger.get_recent(20),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
