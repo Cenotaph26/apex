@@ -186,14 +186,14 @@ class FeedManager:
         streams = []
         for sym in self.watchlist:
             s = sym.lower()
-            streams.append(f"{s}@kline_1m")
+            streams.append(f"{s}@kline_15m")
             streams.append(f"{s}@bookTicker")
         return f"{settings.ws_base}/stream?streams={'/'.join(streams)}"
 
     async def _preload_historical(self):
         """
         Startup'ta her coin için Binance Futures REST API'den
-        son 100 adet 1m mumu çekip buffer'ı anında doldurur.
+        son 100 adet 15m mumu çekip buffer'ı anında doldurur.
         Böylece WS bağlanır bağlanmaz sinyal üretilebilir.
         """
         log.info("Geçmiş veri yükleniyor (%d coin)...", len(self.watchlist))
@@ -208,7 +208,7 @@ class FeedManager:
                             "https://fapi.binance.com/fapi/v1/klines",
                             params={
                                 "symbol":   sym,
-                                "interval": "1m",
+                                "interval": "15m",
                                 "limit":    100,
                             },
                         )

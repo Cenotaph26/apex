@@ -40,7 +40,7 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "70"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "68"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
     loop_interval_sec:  float = float(os.getenv("LOOP_INTERVAL_SEC",  "60"))
     max_open_positions: int   = int(os.getenv("MAX_OPEN_POSITIONS",   "3"))
@@ -59,12 +59,12 @@ class Settings:
 
     # ── MomentumSniper ────────────────────────────────────────
     momentum_consolidation_bars:  int   = int(os.getenv("MOMENTUM_CONSOLIDATION_BARS",   "10"))
-    momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT","0.15"))
+    momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT","0.20"))
 
     # ── TP / SL ───────────────────────────────────────────────
-    tp1_pct:           float = float(os.getenv("TP1_PCT",           "0.6"))
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.3"))
-    tp3_pct:           float = float(os.getenv("TP3_PCT",           "2.2"))
+    tp1_pct:           float = float(os.getenv("TP1_PCT",           "0.8"))
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.6"))
+    tp3_pct:           float = float(os.getenv("TP3_PCT",           "2.8"))
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
     atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.5"))

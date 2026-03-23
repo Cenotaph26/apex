@@ -35,6 +35,7 @@ from agents.orderflow import OrderFlowAgent
 from agents.funding import FundingAgent
 from agents.liquidation import LiquidationHunter
 from core.coin_filter import CoinFilter
+from core.trade_logger import TradeLogger, TradeRecord
 
 log = logging.getLogger("apex.orchestrator")
 
@@ -45,6 +46,9 @@ MAX_EQUITY_PTS = 120
 TP1_CLOSE_PCT = 0.50   # close 50% at TP1
 TP2_CLOSE_PCT = 0.50   # close 50% of remaining (= 25% of original) at TP2
 # TP3 closes everything left
+
+# 15m bar duration in ms
+BAR_DURATION_MS = 15 * 60 * 1000
 
 
 @dataclass
@@ -71,6 +75,7 @@ class Orchestrator:
         self._funding     = FundingAgent()
         self._liquidation = LiquidationHunter()
         self._coin_filter  = CoinFilter()
+        self._trade_logger = TradeLogger()
 
         self._running = False
         self._last_signals: dict[str, CoinSignal] = {}
@@ -128,6 +133,47 @@ class Orchestrator:
         self._pending_eval.add(symbol)
 
     # ── Background loops ──────────────────────────────────────
+    def _make_trade_record(self, pos, exit_price: float,
+                           exit_reason: str, pnl: float) -> "TradeRecord":
+        """Build a TradeRecord from a closed position."""
+        from datetime import datetime, timezone
+        now_ms = int(time.time() * 1000)
+        entry_ms = getattr(pos, 'entry_ts', 0) or 0
+        hold_min = (now_ms - entry_ms) / 60000.0 if entry_ms else 0.0
+        notional = pos.qty * pos.entry_price / pos.leverage
+        if pos.direction == "long":
+            pnl_pct = (exit_price - pos.entry_price) / pos.entry_price * 100
+        else:
+            pnl_pct = (pos.entry_price - exit_price) / pos.entry_price * 100
+        sig = self._last_signals.get(pos.symbol)
+        return TradeRecord(
+            timestamp            = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            symbol               = pos.symbol,
+            direction            = pos.direction,
+            entry_price          = pos.entry_price,
+            exit_price           = exit_price,
+            qty                  = pos.qty,
+            leverage             = pos.leverage,
+            notional_usdt        = round(notional, 2),
+            stop_loss            = pos.stop_loss,
+            tp1                  = pos.tp1,
+            tp2                  = pos.tp2,
+            exit_reason          = exit_reason,
+            tp1_hit              = pos.tp1_hit,
+            pnl_usdt             = round(pnl, 4),
+            pnl_pct              = round(pnl_pct, 2),
+            hold_time_min        = round(hold_min, 1),
+            entry_bar_ts         = entry_ms,
+            exit_bar_ts          = now_ms,
+            score                = sig.score if sig else 0.0,
+            mom_score            = sig.momentum_score if sig else 0.0,
+            of_score             = sig.orderflow_score if sig else 0.0,
+            fu_score             = sig.funding_score if sig else 0.0,
+            lq_score             = sig.liquidation_score if sig else 0.0,
+            session_balance      = round(self.risk.state.current_balance, 2),
+            session_drawdown_pct = round(self.risk.state.drawdown_pct, 2),
+        )
+
     async def _balance_loop(self):
         await asyncio.sleep(30)
         while self._running:
@@ -288,7 +334,7 @@ class Orchestrator:
                 self._log("warn", f"Skipping non-ASCII symbol: {sig.symbol}")
                 return
 
-            ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers)
+            ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers, pending_count=len(self._opening))
             if not ok:
                 self._log("info", f"trade blocked [{sig.symbol}]: {reason}")
                 return
@@ -344,6 +390,7 @@ class Orchestrator:
                 stop_loss=stop_loss, tp1=tp1, tp2=tp2, tp3=tp3,
                 leverage=leverage,
                 order_id=str(result.get("orderId", "")),
+                entry_ts=int(time.time() * 1000),
             )
             self.risk.open_position(pos)
 
@@ -421,7 +468,13 @@ class Orchestrator:
                         r = await self.exec.place_market_order(
                             sym, close_side, pos.qty, reduce_only=True)
                         if r.get("orderId"):
+                            _rec = self._make_trade_record(pos, price, "SL", 0)
                             pnl = self.risk.close_position(sym, price, "SL")
+                            _rec.pnl_usdt = round(pnl, 4)
+                            self._trade_logger.log_trade(_rec)
+                            self._trade_logger.update_session(
+                                self.risk.state.current_balance,
+                                self.risk.state.drawdown_pct)
                             self._losses += 1
                             self._log("warn",
                                 f"Closed {sym} SL pnl={pnl:+.4f} USDT")
@@ -468,7 +521,13 @@ class Orchestrator:
                             sym, close_side, close_qty, reduce_only=True)
                         if r.get("orderId"):
                             pos.tp2_hit = True
+                            _rec2 = self._make_trade_record(pos, price, "TP2", 0)
                             pnl = self.risk.close_position(sym, price, "TP2")
+                            _rec2.pnl_usdt = round(pnl, 4)
+                            self._trade_logger.log_trade(_rec2)
+                            self._trade_logger.update_session(
+                                self.risk.state.current_balance,
+                                self.risk.state.drawdown_pct)
                             self._wins += 1
                             self._log("ok",
                                 f"Closed {sym} TP2 pnl={pnl:+.4f} USDT — full position closed")
@@ -531,7 +590,12 @@ class Orchestrator:
                 symbol, close_side, pos.qty, reduce_only=True)
             if not r.get("orderId"):
                 return f"Market order failed for {symbol}"
+            _fc_rec = self._make_trade_record(pos, cur, "force_close", 0)
             pnl = self.risk.close_position(symbol, cur, "force_close")
+            _fc_rec.pnl_usdt = round(pnl, 4)
+            self._trade_logger.log_trade(_fc_rec)
+            self._trade_logger.update_session(
+                self.risk.state.current_balance, self.risk.state.drawdown_pct)
             msg = f"Force closed {symbol} pnl={pnl:+.4f} USDT"
             self._log("ok" if pnl >= 0 else "warn", msg)
             return msg
@@ -610,6 +674,8 @@ class Orchestrator:
                 f"atr:{settings.min_atr_pct:.2f}%-{settings.max_atr_pct:.2f}%"
             ),
             "coin_filter_stats": self._coin_filter.stats(),
+            "trade_stats":        self._trade_logger.get_stats(),
+            "recent_trades":      self._trade_logger.get_recent(20),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {

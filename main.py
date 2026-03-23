@@ -88,6 +88,34 @@ async def state():
     return orchestrator.snapshot()
 
 
+@app.get("/trades")
+async def get_trades(n: int = 100):
+    """Return last N trades as JSON."""
+    if orchestrator is None:
+        return []
+    return orchestrator._trade_logger.get_recent(n)
+
+
+@app.get("/trades/stats")
+async def trade_stats():
+    """Return session trade statistics."""
+    if orchestrator is None:
+        return {}
+    return orchestrator._trade_logger.get_stats()
+
+
+@app.get("/trades/csv")
+async def trades_csv():
+    """Return trades CSV file."""
+    import os
+    from fastapi.responses import FileResponse
+    path = os.path.join(os.getenv("DATA_DIR", "/data"), "trades.csv")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/csv",
+                           filename="apex_trades.csv")
+    return {"error": "No trade log yet"}
+
+
 # ── Control endpoints ─────────────────────────────────────────────────────────
 
 @app.post("/control/leverage")

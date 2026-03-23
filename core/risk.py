@@ -94,7 +94,8 @@ class Position:
     order_id:     str   = ""
     sl_order_id:  str   = ""
     tp1_order_id: str   = ""
-    pnl:          float = 0.0   # unrealized, updated every tick
+    pnl:          float = 0.0
+    entry_ts:     int   = 0    # ms timestamp when position opened   # unrealized, updated every tick
 
 
 @dataclass
@@ -155,10 +156,13 @@ class RiskManager:
         log.info("Global leverage set: x%d", leverage)
 
     def can_open(self, symbol: str, direction: str,
-                 buffers: dict[str, CandleBuffer]) -> tuple[bool, str]:
+                 buffers: dict[str, CandleBuffer],
+                 pending_count: int = 0) -> tuple[bool, str]:
         if symbol in self.state.positions:
             return False, f"already have position in {symbol}"
-        if len(self.state.positions) >= settings.max_open_positions:
+        # Count pending (being opened) + confirmed positions
+        total_active = len(self.state.positions) + pending_count
+        if total_active >= settings.max_open_positions:
             return False, f"max positions reached ({settings.max_open_positions})"
         if self.state.drawdown_pct >= settings.max_drawdown_pct:
             return False, (
