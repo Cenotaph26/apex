@@ -243,7 +243,7 @@ body{padding:12px;overflow-y:auto}
   <div class="mc"><div class="mlbl">Win rate</div>
     <div class="mval" id="m-wr">—</div><div class="msub" id="m-wl">—</div></div>
   <div class="mc"><div class="mlbl">Open pos.</div>
-    <div class="mval or" id="m-pos">—</div><div class="msub" id="m-pos-max">max —</div></div>
+    <div class="mval or" id="m-pos">—</div><div class="msub">max 3</div></div>
   <div class="mc"><div class="mlbl">Drawdown</div>
     <div class="mval" id="m-dd">—</div><div class="msub">limit 8%</div></div>
 </div>
@@ -393,12 +393,116 @@ body{padding:12px;overflow-y:auto}
     <div class="ctrl-divider"></div>
 
     <div class="ctrl-section">
+      <div class="ctrl-lbl">TP Seviyeleri (%)</div>
+      <div class="ctrl-row" style="gap:4px">
+        <div style="display:flex;flex-direction:column;gap:2px;flex:1">
+          <div class="tsk">TP1%</div>
+          <input type="number" class="lev-input" id="tp1-val" step="0.1" min="0.5" max="5" value="2.0" style="width:100%">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex:1">
+          <div class="tsk">TP2%</div>
+          <input type="number" class="lev-input" id="tp2-val" step="0.1" min="1" max="10" value="4.0" style="width:100%">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex:1">
+          <div class="tsk">TP3%</div>
+          <input type="number" class="lev-input" id="tp3-val" step="0.1" min="2" max="15" value="7.0" style="width:100%">
+        </div>
+        <button class="apply-btn" style="margin-top:14px" onclick="applyTP()">Uygula</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">ATR SL Çarpanı</div>
+      <div class="ctrl-row">
+        <div class="lev-grid" style="grid-template-columns:repeat(5,1fr);flex:1">
+          <div class="lev-preset" onclick="setATR(1.5)">×1.5</div>
+          <div class="lev-preset" onclick="setATR(2.0)">×2.0</div>
+          <div class="lev-preset" onclick="setATR(2.5)">×2.5</div>
+          <div class="lev-preset active" onclick="setATR(3.0)">×3.0</div>
+          <div class="lev-preset" onclick="setATR(3.5)">×3.5</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Saat Filtresi (UTC)</div>
+      <div class="ctrl-row" style="gap:4px">
+        <label style="display:flex;align-items:center;gap:4px;color:var(--g1);font-size:9px;cursor:pointer">
+          <input type="checkbox" id="hours-enabled" checked onchange="toggleHours()">
+          Aktif
+        </label>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div class="tsk">Başlangıç</div>
+          <input type="number" class="lev-input" id="hours-start" min="0" max="23" value="9" style="width:48px">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <div class="tsk">Bitiş</div>
+          <input type="number" class="lev-input" id="hours-end" min="0" max="23" value="18" style="width:48px">
+        </div>
+        <button class="apply-btn" style="margin-top:10px" onclick="applyHours()">Uygula</button>
+      </div>
+      <div id="hours-status" style="font-size:9px;color:var(--g2);margin-top:3px">09:00-18:00 UTC aktif</div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Kara Liste</div>
+      <div class="ctrl-row">
+        <input type="text" class="sym-select" id="blacklist-input"
+          placeholder="WIFUSDT,HUMAUSDT,SKYUSDT..."
+          value="WIFUSDT,HUMAUSDT,SKYUSDT,PIXELUSDT,PAXGUSDT,SIGNUSDT"
+          style="font-size:10px">
+        <button class="apply-btn" onclick="applyBlacklist()">Uygula</button>
+      </div>
+      <div id="blacklist-status" style="font-size:9px;color:var(--g2);margin-top:3px">6 sembol kara listede</div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
       <div class="ctrl-lbl">Trailing Stop</div>
       <div class="lev-grid" style="grid-template-columns:repeat(4,1fr)">
         <div class="lev-preset" onclick="setTrail('none')">Yok</div>
         <div class="lev-preset" onclick="setTrail('breakeven')">BE</div>
         <div class="lev-preset" onclick="setTrail('tp1')">TP1</div>
         <div class="lev-preset" onclick="setTrail('atr_trail')">ATR</div>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Saat Filtresi (UTC)</div>
+      <div class="ctrl-row">
+        <input type="text" class="lev-input" id="hours-val"
+          placeholder="9-12,14,17" style="width:120px"
+          title="Örnek: 9-12,14,17 = 09-12, 14, 17 UTC aktif. Boş = 24 saat">
+        <button class="apply-btn" onclick="setHours()">Uygula</button>
+        <button class="apply-btn" style="border-color:#555;color:var(--g1)"
+                onclick="clearHours()">Temizle</button>
+      </div>
+      <div style="font-size:9px;color:var(--g2);margin-top:3px">
+        Boş bırak = 24 saat aktif. Örn: 9-12,14,17
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl">Kara Liste (Sembol)</div>
+      <div class="ctrl-row">
+        <input type="text" class="sym-select" id="blacklist-val"
+          placeholder="WIFUSDT,HUMAUSDT,SKYUSDT"
+          title="Virgülle ayrılmış semboller. Bot bu sembolleri hiç izlemez.">
+        <button class="apply-btn" onclick="setBlacklist()">Uygula</button>
+      </div>
+      <div style="font-size:9px;color:var(--g2);margin-top:3px">
+        Varsayılan: WIF,HUMA,SKY,PIXEL,PAXG,SIGN
       </div>
     </div>
 
@@ -460,9 +564,13 @@ body{padding:12px;overflow-y:auto}
     <div class="rrow"><span class="rk">drawdown</span><span class="rv ok" id="rk-dd">0.0%</span></div>
     <div class="rrow"><span class="rk">circuit breaker</span><span class="rv ok" id="rk-cb">OFF</span></div>
     <div class="rrow"><span class="rk">correlation filter</span><span class="rv ok">PASS</span></div>
-    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / —</span></div>
+    <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / 3</span></div>
     <div class="rrow"><span class="rk">global leverage</span><span class="rv hot" id="rk-lev">x1</span></div>
     <div class="rrow"><span class="rk">wins / losses</span><span class="rv" id="rk-wl">—</span></div>
+    <div class="rrow"><span class="rk">score threshold</span><span class="rv hot" id="rk-score">—</span></div>
+    <div class="rrow"><span class="rk">TP1 / TP2 / TP3</span><span class="rv" id="rk-tps">—</span></div>
+    <div class="rrow"><span class="rk">saat filtresi</span><span class="rv" id="rk-hours">—</span></div>
+    <div class="rrow"><span class="rk">kara liste</span><span class="rv" id="rk-bl">—</span></div>
     <div class="rrow"><span class="rk">uptime</span><span class="rv" id="rk-up">—</span></div>
   </div>
 </div>
@@ -628,6 +736,11 @@ function applyState(d){
   }
 
   if(!d||!d.balance)return;
+  // Saat filtresi göster
+  if(d.trading_hours !== undefined){
+    const hv = $('hours-val');
+    if(hv && !hv.value) hv.placeholder = d.trading_hours || 'Boş = 24 saat aktif';
+  }
   if(!d||d.balance===undefined)return;
   set('uptime',d.uptime||'—');
   var now=new Date();
@@ -647,11 +760,30 @@ function applyState(d){
   set('rk-dd',dd.toFixed(1)+'%');
   var rdd=$('rk-dd');if(rdd)rdd.className='rv '+(dd>=5?'warn':dd>=3?'hot':'ok');
   set('rk-cb',dd.toFixed(1)+'% — '+(dd>=8?'ON':'OFF'));
-  var maxPos = d.max_open_positions || 3;
-  set('rk-om', pos + ' / ' + maxPos);
-  set('m-pos-max', 'max ' + maxPos);
+  set('rk-om',pos+' / 3');
   set('rk-wl',(d.wins||0)+' / '+(d.losses||0));
   set('rk-up',d.uptime||'—');
+  if(d.score_threshold) set('rk-score', d.score_threshold);
+  if(d.tp1_pct) set('rk-tps', d.tp1_pct+'% / '+(d.tp2_pct||'?')+'% / '+(d.tp3_pct||'?')+'%');
+  if(d.trading_hours_enabled !== undefined){
+    set('rk-hours', d.trading_hours_enabled ?
+      (d.trading_hours_start||9)+':00-'+(d.trading_hours_end||18)+':00 UTC' : 'Kapalı');
+    if($('hours-enabled')) $('hours-enabled').checked = d.trading_hours_enabled;
+    if($('hours-start')) $('hours-start').value = d.trading_hours_start||9;
+    if($('hours-end')) $('hours-end').value = d.trading_hours_end||18;
+  }
+  if(d.symbol_blacklist){
+    const bl=d.symbol_blacklist;
+    set('rk-bl', bl.length+' sembol');
+    if($('blacklist-input') && bl.length>0)
+      $('blacklist-input').value = bl.join(',');
+    if($('blacklist-status')) $('blacklist-status').textContent=bl.length+' sembol kara listede';
+  }
+  if(d.tp1_pct && $('tp1-val')){
+    $('tp1-val').value = d.tp1_pct;
+    $('tp2-val').value = d.tp2_pct||4.0;
+    $('tp3-val').value = d.tp3_pct||7.0;
+  }
   set('rk-lev','x'+(d.global_leverage||1));
   if(d.watchlist_count) set('h-coins', d.watchlist_count);
   if(d.filter_info){
@@ -711,6 +843,80 @@ function feedback(msg,ok){
   if(!el)return;
   el.textContent=msg;
   el.style.color=ok===false?'var(--red)':'var(--green)';
+}
+
+async function applyTP(){
+  const tp1=parseFloat($('tp1-val').value)||2.0;
+  const tp2=parseFloat($('tp2-val').value)||4.0;
+  const tp3=parseFloat($('tp3-val').value)||7.0;
+  try{
+    const r=await fetch(`/control/tp?tp1=${tp1}&tp2=${tp2}&tp3=${tp3}`,{method:'POST'});
+    const d=await r.json(); feedback(d.msg||'TP güncellendi',d.ok);
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function setATR(mult){
+  try{
+    const r=await fetch(`/control/atr?multiplier=${mult}`,{method:'POST'});
+    const d=await r.json(); feedback(d.msg||'ATR: ×'+mult,d.ok);
+    document.querySelectorAll('.ctrl-section .lev-preset').forEach(b=>{
+      if(b.textContent==='×'+mult) b.classList.add('active');
+      else if(b.textContent.startsWith('×')) b.classList.remove('active');
+    });
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function applyHours(){
+  const en=$('hours-enabled').checked;
+  const st=parseInt($('hours-start').value)||9;
+  const en2=parseInt($('hours-end').value)||18;
+  try{
+    const r=await fetch(`/control/hours?enabled=${en}&start=${st}&end=${en2}`,{method:'POST'});
+    const d=await r.json(); feedback(d.msg||'Saat filtresi güncellendi',d.ok);
+    $('hours-status').textContent=d.msg||'—';
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+function toggleHours(){
+  const en=$('hours-enabled').checked;
+  $('hours-status').textContent=en?'Aktif — değerleri uygula':'Devre dışı';
+}
+
+async function applyBlacklist(){
+  const syms=$('blacklist-input').value.trim();
+  try{
+    const r=await fetch(`/control/blacklist?symbols=${encodeURIComponent(syms)}`,{method:'POST'});
+    const d=await r.json(); feedback(d.msg||'Kara liste güncellendi',d.ok);
+    const cnt=syms.split(',').filter(s=>s.trim()).length;
+    $('blacklist-status').textContent=cnt+' sembol kara listede';
+  }catch(e){feedback('Hata: '+e,false);}
+}
+
+async function setHours(){
+  const val = ($('hours-val').value || '').trim();
+  try{
+    const r = await fetch('/control/hours?hours='+encodeURIComponent(val), {method:'POST'});
+    const d = await r.json();
+    feedback(d.msg || 'OK', d.ok);
+  }catch(e){feedback('Hata: '+e, false);}
+}
+
+async function clearHours(){
+  $('hours-val').value = '';
+  try{
+    const r = await fetch('/control/hours?hours=', {method:'POST'});
+    const d = await r.json();
+    feedback('Saat filtresi kaldırıldı (24 saat aktif)', d.ok);
+  }catch(e){feedback('Hata: '+e, false);}
+}
+
+async function setBlacklist(){
+  const val = ($('blacklist-val').value || '').trim();
+  try{
+    const r = await fetch('/control/blacklist?symbols='+encodeURIComponent(val), {method:'POST'});
+    const d = await r.json();
+    feedback(d.msg || 'OK', d.ok);
+  }catch(e){feedback('Hata: '+e, false);}
 }
 
 async function setTrail(mode){

@@ -138,6 +138,84 @@ async def force_close(symbol: str):
     return {"ok": True, "msg": msg}
 
 
+@app.post("/control/tp")
+async def set_tp(tp1: float = 2.0, tp2: float = 4.0, tp3: float = 7.0):
+    """TP seviyelerini değiştir (%)"""
+    settings.tp1_pct = tp1; settings.tp2_pct = tp2; settings.tp3_pct = tp3
+    from core.storage import storage
+    storage.save_config("tp1_pct", tp1)
+    storage.save_config("tp2_pct", tp2)
+    storage.save_config("tp3_pct", tp3)
+    return {"ok": True, "msg": f"TP güncellendi: TP1={tp1}% TP2={tp2}% TP3={tp3}%"}
+
+
+@app.post("/control/atr")
+async def set_atr(multiplier: float = 3.0):
+    """ATR SL çarpanını değiştir"""
+    settings.atr_sl_multiplier = multiplier
+    from core.storage import storage
+    storage.save_config("atr_sl_multiplier", multiplier)
+    return {"ok": True, "msg": f"ATR SL multiplier: ×{multiplier}"}
+
+
+@app.post("/control/hours")
+async def set_hours(enabled: bool = True, start: int = 9, end: int = 18):
+    """Saat filtresi (UTC). enabled=false ile kapat."""
+    settings.trading_hours_enabled = enabled
+    settings.trading_hours_start   = start
+    settings.trading_hours_end     = end
+    from core.storage import storage
+    storage.save_config("trading_hours_enabled", enabled)
+    storage.save_config("trading_hours_start",   start)
+    storage.save_config("trading_hours_end",     end)
+    status = f"{start:02d}:00-{end:02d}:00 UTC" if enabled else "Devre dışı"
+    return {"ok": True, "msg": f"Saat filtresi: {status}"}
+
+
+@app.post("/control/blacklist")
+async def set_blacklist(symbols: str = ""):
+    """Kara liste güncelle. Virgülle ayır: WIFUSDT,HUMAUSDT"""
+    bl = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    settings.symbol_blacklist = bl
+    from core.storage import storage
+    storage.save_config("symbol_blacklist", bl)
+    return {"ok": True, "msg": f"Kara liste: {bl}"}
+
+
+@app.post("/control/hours")
+async def set_trading_hours(hours: str = ""):
+    """
+    Saat filtresi ayarla. Örn: hours=9-12,14,17
+    Boş string = 24 saat aktif (filtre yok).
+    """
+    settings.trading_hours = hours.strip()
+    from core.storage import storage
+    storage.save_config("trading_hours", hours.strip())
+    if hours.strip():
+        msg = f"Saat filtresi: {hours.strip()} UTC aktif"
+    else:
+        msg = "Saat filtresi kaldırıldı — 24 saat aktif"
+    if orchestrator:
+        orchestrator._log("ok", msg)
+    return {"ok": True, "msg": msg}
+
+
+@app.post("/control/blacklist")
+async def set_blacklist(symbols: str = ""):
+    """
+    Kara liste güncelle. Örn: symbols=WIFUSDT,HUMAUSDT
+    Boş string = kara liste temizle.
+    """
+    settings.symbol_blacklist = symbols.strip()
+    from core.storage import storage
+    storage.save_config("symbol_blacklist", symbols.strip())
+    count = len([s for s in symbols.split(",") if s.strip()])
+    msg = f"Kara liste: {count} sembol eklendi" if symbols.strip() else "Kara liste temizlendi"
+    if orchestrator:
+        orchestrator._log("ok", msg)
+    return {"ok": True, "msg": msg}
+
+
 @app.post("/control/trail")
 async def set_trail(mode: str = "none"):
     """Set trailing stop mode: none | breakeven | tp1 | atr_trail"""
@@ -188,7 +266,9 @@ async def set_score_threshold(value: float):
     log.info("Score threshold set to %.1f", value)
     return {"ok": True, "msg": f"Min skor eşiği: {value:.0f}",
             "score_threshold": value}
-
+    from core.storage import storage
+    storage.save_config("score_threshold", threshold)
+    log.info("Score threshold set: %.1f (saved to Redis)", threshold)
 
 @app.get("/stream")
 async def stream(request: Request):
