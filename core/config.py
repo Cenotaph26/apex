@@ -43,6 +43,18 @@ class Settings:
     score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "65"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
 
+    # ── Gerçek trade verisi bulgularına dayanan filtreler ──────────────
+    # -341 USDT kaybın %73'ü bu 7 sembolden geldi (24-31 Mart gerçek data)
+    symbol_blacklist: str = os.getenv(
+        "SYMBOL_BLACKLIST",
+        "WIFUSDT,HUMAUSDT,SKYUSDT,PIXELUSDT,PAXGUSDT,SIGNUSDT,ZROUSDT"
+    )
+
+    # Saat filtresi: 08-18 UTC iyi saatler WR=%77 +121$, kötü saatler WR=%22 -390$
+    trading_hours_enabled: bool = os.getenv("TRADING_HOURS_ENABLED","true").lower() == "true"
+    trading_hours_start:   int  = int(os.getenv("TRADING_HOURS_START", "8"))
+    trading_hours_end:     int  = int(os.getenv("TRADING_HOURS_END",  "18"))
+
     def load_from_redis(self):
         """Restart sonrası Redis'ten kaydedilmiş runtime ayarları yükle."""
         try:
@@ -59,8 +71,10 @@ class Settings:
                 ("tp1_pct",            "tp1_pct",            float),
                 ("tp2_pct",            "tp2_pct",            float),
                 ("tp3_pct",            "tp3_pct",            float),
-                ("trading_hours",      "trading_hours",      str),
-                ("symbol_blacklist",   "symbol_blacklist",   str),
+                ("symbol_blacklist",        "symbol_blacklist",        str),
+                ("trading_hours_enabled",   "trading_hours_enabled",   bool),
+                ("trading_hours_start",     "trading_hours_start",     int),
+                ("trading_hours_end",       "trading_hours_end",       int),
             ]:
                 if key in saved and hasattr(self, attr):
                     setattr(self, attr, typ(saved[key]))
@@ -78,23 +92,7 @@ class Settings:
     max_drawdown_pct:       float = float(os.getenv("MAX_DRAWDOWN_PCT",      "8.0"))
     max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT","6.0"))
     correlation_threshold:  float = float(os.getenv("CORRELATION_THRESHOLD", "0.75"))
-    # Saat filtresi: boş string = tüm saatler aktif
-    # Örnek: "9-12,14,17" = sadece 09:00-12:00, 14:00-15:00, 17:00-18:00 UTC
-    # Gerçek veriden iyi saatler: WR>50% olan 09-12, 14, 17 UTC
-    trading_hours:      str   = os.getenv("TRADING_HOURS", "")  # boş = 24 saat
     trail_mode:             str   = os.getenv("TRAIL_MODE", "none")   # none|breakeven|tp1|atr_trail — backtest: none best PnL
-    # Kara liste: virgülle ayrılmış semboller — gerçek veriden kötü performanslılar
-    # WIF(-54$), HUMA(-49$), SKY(-40$), PIXEL(-39$), PAXG(-32$) toplamın %63'ü
-    symbol_blacklist:   str   = os.getenv("SYMBOL_BLACKLIST", "WIFUSDT,HUMAUSDT,SKYUSDT,PIXELUSDT,PAXGUSDT,SIGNUSDT")  # gerçek veriden kara liste
-    # Saat filtresi: sadece bu saatlerde işlem aç (UTC, boş=hep aktif)
-    # Gerçek veri: 09-12 ve 14-18 UTC → WR %51, diğerleri %33
-    trading_hours_start:    int   = int(os.getenv("TRADING_HOURS_START", "9"))
-    trading_hours_end:      int   = int(os.getenv("TRADING_HOURS_END",   "18"))
-    trading_hours_enabled:  bool  = os.getenv("TRADING_HOURS_ENABLED", "false").lower() == "true"  # varsayılan kapalı, panelden açılır
-    # Kara liste: bu semboller hiç işleme alınmaz
-    symbol_blacklist: list[str] = [s.strip() for s in
-        os.getenv("SYMBOL_BLACKLIST", "WIFUSDT,HUMAUSDT,SKYUSDT,PIXELUSDT,PAXGUSDT,SIGNUSDT").split(",")
-        if s.strip()]
 
     # ── Agent weights ─────────────────────────────────────────
     weight_momentum:    float = float(os.getenv("WEIGHT_MOMENTUM",    "0.35"))
@@ -107,18 +105,12 @@ class Settings:
     momentum_breakout_margin_pct: float = float(os.getenv("MOMENTUM_BREAKOUT_MARGIN_PCT","0.20"))
 
     # ── TP / SL ───────────────────────────────────────────────
-    # TP seviyeleri — gerçek veriye göre optimize edildi (24-31 Mart analizi)
-    # TP1=1.5%: R:R=0.70 (mevcut 0.46'dan iyi), TP1 hit oranı artar
-    # TP2=2.5%: Ulaşılabilir, sim. net +177 USDT
-    # TP3=4.0%: Gerçekçi hedef (önceki 7.0% hiç dolmuyordu)
-    tp1_pct:           float = float(os.getenv("TP1_PCT",           "1.5"))  # %1.5 — TP3 erişilebilir
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "3.0"))  # %3.0 — SL ortalama %2.1den uzak
-    tp3_pct:           float = float(os.getenv("TP3_PCT",           "5.0"))  # %5.0 x10 kaldıraçla %50 ROI
+    tp1_pct:           float = float(os.getenv("TP1_PCT",           "1.5"))   # Gerçek: SL ort %2.15, TP1=%1 → R:R=0.46. TP1=1.5% → R:R=0.70
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "2.5"))   # Gerçek: TP2 sonrası fiyat ort +0.1% — daha az gidiyor, geniş TP2 gereksiz
+    tp3_pct:           float = float(os.getenv("TP3_PCT",           "4.0"))   # TP3 hiç dolmadı — daha erişilebilir hedef
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
-    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "3.0"))  # geniş SL — gürültüden kaçınır
-    tp1_close_pct:      float = float(os.getenv("TP1_CLOSE_PCT",      "0.25"))  # TP1'de %25 kapat
-    tp2_close_pct:      float = float(os.getenv("TP2_CLOSE_PCT",      "0.50"))  # TP2'de kalan %50 kapat
+    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "3.0"))
 
     # ── Watchlist ön filtresi ────────────────────────────────
     # Binance'tan çekilen tüm coinlere uygulanır.
@@ -129,6 +121,19 @@ class Settings:
     filter_refresh_hours: int = int(os.getenv("FILTER_REFRESH_HOURS", "6"))          # kaç saatte bir filtre yenilenir
 
     # ── URLs ──────────────────────────────────────────────────
+    @property
+    def blacklisted_symbols(self) -> set:
+        """Kara listedeki sembolleri set olarak döndür."""
+        return {s.strip().upper() for s in self.symbol_blacklist.split(",") if s.strip()}
+
+    def is_trading_hour(self) -> bool:
+        """08-18 UTC arası mı kontrol et."""
+        if not self.trading_hours_enabled:
+            return True
+        from datetime import datetime, timezone
+        h = datetime.now(timezone.utc).hour
+        return self.trading_hours_start <= h < self.trading_hours_end
+
     @property
     def is_futures_demo(self) -> bool:
         return self.mode == "futures_demo"

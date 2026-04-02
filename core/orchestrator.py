@@ -54,15 +54,10 @@ log = logging.getLogger("apex.orchestrator")
 MAX_LOG_LINES  = 60
 MAX_EQUITY_PTS = 120
 
-# TP kapatma oranları — gerçek 111 trade verisine göre optimize edildi
-# TP3'e hiç ulaşılamadı çünkü TP2'de %100 kapanıyordu
-# Yeni strateji: TP1=%25, TP2=%33 (kalanın), TP3=tam kapat
-TP1_CLOSE_PCT = 0.25   # %25 kapat → %75 TP2/TP3'e taşınır (gerçek veri analizi)
-TP2_CLOSE_PCT = 0.50   # kalanın %50'si → orijinal pozisyonun %37.5'i
-# TP3 closes everything left (~%37.5 orijinal pozisyon)
-
-# 15m bar süresi
-BAR_DURATION_MS = 15 * 60 * 1000
+# What fraction of the original position to close at each TP level
+TP1_CLOSE_PCT = 0.25   # close 25% at TP1 (backtest: higher PF with 25%)
+TP2_CLOSE_PCT = 0.50   # close 50% of remaining (= 25% of original) at TP2
+# TP3 closes everything left
 
 # 15m bar duration in ms
 BAR_DURATION_MS = 15 * 60 * 1000
@@ -152,31 +147,6 @@ class Orchestrator:
         self._pending_eval.add(symbol)
 
     # ── Background loops ──────────────────────────────────────
-    def _is_trading_hour(self) -> bool:
-        """
-        TRADING_HOURS config'e göre şu anki saatin işlem saati olup olmadığını kontrol eder.
-        Format: "9-12,14,17" = 09:00-12:59, 14:00-14:59, 17:00-17:59 UTC
-        Boş string = tüm saatler aktif (default)
-        """
-        hours_str = getattr(settings, 'trading_hours', '').strip()
-        if not hours_str:
-            return True  # Filtre yok — tüm saatler aktif
-
-        current_hour = datetime.now(timezone.utc).hour
-        try:
-            for part in hours_str.split(","):
-                part = part.strip()
-                if "-" in part:
-                    lo, hi = map(int, part.split("-"))
-                    if lo <= current_hour <= hi:
-                        return True
-                else:
-                    if current_hour == int(part):
-                        return True
-            return False
-        except Exception:
-            return True  # Parse hatası → filtre uygulama
-
     def _make_trade_record(self, pos, exit_price: float,
                            exit_reason: str, pnl: float) -> "TradeRecord":
         """Build a TradeRecord from a closed position."""
@@ -335,13 +305,7 @@ class Orchestrator:
                 f"({len(signals)} coins evaluated)")
 
             if winner.score >= settings.score_threshold:
-                # Saat filtresi kontrolü
-                if self._is_trading_hour():
-                    await self._try_open(winner)
-                else:
-                    self._log("info",
-                        f"Saat filtresi: {winner.symbol} skoru {winner.score:.0f} "
-                        f"ama trading saati dışında")
+                await self._try_open(winner)
 
     # ── Scoring ───────────────────────────────────────────────
     async def _score_coin(self, symbol: str) -> CoinSignal | None:
@@ -384,25 +348,17 @@ class Orchestrator:
                 self._log("warn", f"Skipping non-ASCII symbol: {sig.symbol}")
                 return
 
-            # Kara liste kontrolü
-            blacklist = [s.strip().upper() for s in settings.symbol_blacklist.split(",") if s.strip()]
-            if sig.symbol.upper() in blacklist:
-                return  # sessizce atla
-
-            # Kara liste kontrolü (gerçek veri: WIF/HUMA/SKY/PIXEL toplam -232 USDT)
-            if sig.symbol in settings.symbol_blacklist:
-                self._log("info", f"Blacklisted: {sig.symbol}")
+            # Kara liste filtresi — gerçek data: WIF/HUMA/SKY/PIXEL/PAXG -250 USDT
+            if sig.symbol in settings.blacklisted_symbols:
+                self._log("info", f"[{sig.symbol}] kara listede, atlandı")
                 return
 
-            # Saat filtresi (gerçek veri: 09-18 UTC WR=%51 vs diğerleri %33)
-            if settings.trading_hours_enabled:
-                from datetime import datetime, timezone
-                current_hour = datetime.now(timezone.utc).hour
-                if not (settings.trading_hours_start <= current_hour < settings.trading_hours_end):
-                    self._log("info",
-                        f"Out of trading hours ({current_hour:02d}:xx UTC, "
-                        f"window={settings.trading_hours_start:02d}-{settings.trading_hours_end:02d})")
-                    return
+            # Saat filtresi — 08-18 UTC dışında işlem açma
+            if not settings.is_trading_hour():
+                self._log("info",
+                    f"[{sig.symbol}] saat filtresi aktif "
+                    f"({settings.trading_hours_start}-{settings.trading_hours_end} UTC)")
+                return
 
             ok, reason = self.risk.can_open(sig.symbol, sig.direction, self.feed.buffers, pending_count=len(self._opening))
             if not ok:
@@ -633,21 +589,15 @@ class Orchestrator:
                     try:
                         self._log("ok",
                             f"TP3 hit: {sym} @ {price:.{pp}f} "
-                            f"— closing remaining {pos.qty} lots (FULL EXIT)")
+                            f"— closing remaining {pos.qty} lots")
                         r = await self.exec.place_market_order(
                             sym, close_side, pos.qty, reduce_only=True)
                         if r.get("orderId"):
                             pos.tp3_hit = True
-                            _rec3 = self._make_trade_record(pos, price, "TP3", 0)
                             pnl = self.risk.close_position(sym, price, "TP3")
-                            _rec3.pnl_usdt = round(pnl, 4)
-                            self._trade_logger.log_trade(_rec3)
-                            self._trade_logger.update_session(
-                                self.risk.state.current_balance,
-                                self.risk.state.drawdown_pct)
                             self._wins += 1
                             self._log("ok",
-                                f"Closed {sym} TP3 🎯 pnl={pnl:+.4f} USDT")
+                                f"Closed {sym} TP3 pnl={pnl:+.4f} USDT")
                         else:
                             self._log("err",
                                 f"TP3 market order FAILED for {sym}")
@@ -765,24 +715,21 @@ class Orchestrator:
             "global_leverage":   settings.default_leverage,
             "score_threshold":   settings.score_threshold,
             "max_open_positions": settings.max_open_positions,
-            "tp1_pct":             settings.tp1_pct,
-            "tp2_pct":             settings.tp2_pct,
-            "tp3_pct":             settings.tp3_pct,
-            "atr_sl_multiplier":   settings.atr_sl_multiplier,
-            "trading_hours_enabled": getattr(settings, "trading_hours_enabled", True),
-            "trading_hours":         getattr(settings, "trading_hours", ""),
-            "symbol_blacklist":      getattr(settings, "symbol_blacklist", ""),
-            "trading_hour_active":   self._is_trading_hour(),
-            "trading_hours_start": settings.trading_hours_start,
-            "trading_hours_end":   settings.trading_hours_end,
-            "symbol_blacklist":    settings.symbol_blacklist,
-            "trail_mode":          settings.trail_mode,
             "watchlist_count":   len(settings.watchlist),
             "filter_info":       (
                 f"vol≥{settings.min_volume_usdt/1e6:.0f}M "
                 f"atr:{settings.min_atr_pct:.2f}%-{settings.max_atr_pct:.2f}%"
             ),
-            "coin_filter_stats": self._coin_filter.stats(),
+            "coin_filter_stats":   self._coin_filter.stats(),
+            "symbol_blacklist":     list(settings.blacklisted_symbols),
+            "trading_hours":        {
+                "enabled": settings.trading_hours_enabled,
+                "start":   settings.trading_hours_start,
+                "end":     settings.trading_hours_end,
+                "active":  settings.is_trading_hour(),
+            },
+            "max_open_positions":   settings.max_open_positions,
+            "max_open_positions":  settings.max_open_positions,
             "trade_stats":        self._trade_logger.get_stats(),
             "recent_trades":      self._trade_logger.get_recent(20),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
