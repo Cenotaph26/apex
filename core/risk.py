@@ -95,7 +95,8 @@ class Position:
     sl_order_id:  str   = ""
     tp1_order_id: str   = ""
     pnl:          float = 0.0
-    entry_ts:     int   = 0    # ms timestamp when position opened   # unrealized, updated every tick
+    entry_ts:     int   = 0    # ms timestamp when position opened
+    entry_score:  float = 0.0  # sinyal skoru — pozisyon açılırken sabitlenir   # unrealized, updated every tick
 
 
 @dataclass

@@ -179,7 +179,7 @@ class Orchestrator:
             hold_time_min        = round(hold_min, 1),
             entry_bar_ts         = entry_ms,
             exit_bar_ts          = now_ms,
-            score                = sig.score if sig else 0.0,
+            score                = pos.entry_score if pos.entry_score > 0 else (sig.score if sig else 0.0),
             mom_score            = sig.momentum_score if sig else 0.0,
             of_score             = sig.orderflow_score if sig else 0.0,
             fu_score             = sig.funding_score if sig else 0.0,
@@ -417,6 +417,7 @@ class Orchestrator:
                 leverage=leverage,
                 order_id=str(result.get("orderId", "")),
                 entry_ts=int(time.time() * 1000),
+                entry_score=sig.score,
             )
             self.risk.open_position(pos)
 
@@ -470,6 +471,21 @@ class Orchestrator:
                 lng = pos.direction == "long"
 
                 # ── SL ────────────────────────────────────────
+                # TP2 sonrası ATR trailing stop — TP3'e giderken SL dinamik kayar
+                if getattr(pos, '_tp2_trail_active', False) and pos.tp2_hit:
+                    _buf2 = self.feed.buffers.get(sym)
+                    if _buf2 and len(_buf2.closed) >= 2:
+                        _atr2 = atr(list(_buf2.closed))
+                        if _atr2 > 0:
+                            if pos.direction == "long":
+                                _new_sl = price - _atr2 * 1.5
+                                if _new_sl > pos.stop_loss:
+                                    pos.stop_loss = round(_new_sl, 8)
+                            else:
+                                _new_sl = price + _atr2 * 1.5
+                                if _new_sl < pos.stop_loss:
+                                    pos.stop_loss = round(_new_sl, 8)
+
                 sl_hit = price <= pos.stop_loss if lng else price >= pos.stop_loss
 
                 # ── TP1 ───────────────────────────────────────
@@ -559,25 +575,45 @@ class Orchestrator:
                 elif tp2_hit:
                     self._closing.add(sym)
                     try:
-                        # TP2: close ALL remaining qty (position fully closed here)
-                        close_qty = pos.qty
+                        # TP2: TP2_CLOSE_PCT kadarını kapat, kalanı TP3'e bırak
+                        _, step, pp2 = SYMBOL_INFO.get(sym, (1.0, 1.0, 4))
+                        tp2_close_qty = max(
+                            _round_step(pos.qty * TP2_CLOSE_PCT, step), step)
+                        # Kalan miktar TP3 için yeterli değilse tümünü kapat
+                        remaining_after_tp2 = pos.qty - tp2_close_qty
+                        if remaining_after_tp2 < step:
+                            tp2_close_qty = pos.qty  # tümünü kapat
                         self._log("ok",
                             f"TP2 hit: {sym} @ {price:.{pp}f} "
-                            f"— closing ALL remaining {close_qty} lots")
+                            f"— closing {TP2_CLOSE_PCT*100:.0f}% ({tp2_close_qty} lots)"
+                            f" | remaining for TP3: {pos.qty - tp2_close_qty:.4f}")
                         r = await self.exec.place_market_order(
-                            sym, close_side, close_qty, reduce_only=True)
+                            sym, close_side, tp2_close_qty, reduce_only=True)
                         if r.get("orderId"):
                             pos.tp2_hit = True
-                            _rec2 = self._make_trade_record(pos, price, "TP2", 0)
-                            pnl = self.risk.close_position(sym, price, "TP2")
-                            _rec2.pnl_usdt = round(pnl, 4)
-                            self._trade_logger.log_trade(_rec2)
-                            self._trade_logger.update_session(
-                                self.risk.state.current_balance,
-                                self.risk.state.drawdown_pct)
-                            self._wins += 1
+                            pos.qty -= tp2_close_qty
+                            # SL'yi TP2 seviyesine taşı (kalan miktar için risk sıfır)
+                            pos.stop_loss = pos.tp2
+                            # Kısmi PnL kaydet
+                            partial_pnl = (
+                                (price - pos.entry_price) * tp2_close_qty / pos.leverage
+                                if pos.direction == "long"
+                                else (pos.entry_price - price) * tp2_close_qty / pos.leverage
+                            )
                             self._log("ok",
-                                f"Closed {sym} TP2 pnl={pnl:+.4f} USDT — full position closed")
+                                f"TP2 partial {sym} pnl≈{partial_pnl:+.4f} USDT"
+                                f" | qty remaining={pos.qty:.4f} → TP3={pos.tp3:.{pp}f}")
+                            if pos.qty <= step:
+                                # Miktar kalmadı, pozisyonu kapat
+                                _rec2 = self._make_trade_record(pos, price, "TP2", 0)
+                                pnl = self.risk.close_position(sym, price, "TP2")
+                                _rec2.pnl_usdt = round(pnl, 4)
+                                self._trade_logger.log_trade(_rec2)
+                                self._trade_logger.update_session(
+                                    self.risk.state.current_balance,
+                                    self.risk.state.drawdown_pct)
+                                self._wins += 1
+                                self._log("ok", f"TP2 fully closed {sym}")
                         else:
                             self._log("err",
                                 f"TP2 market order FAILED for {sym}")
@@ -594,10 +630,16 @@ class Orchestrator:
                             sym, close_side, pos.qty, reduce_only=True)
                         if r.get("orderId"):
                             pos.tp3_hit = True
+                            _rec3 = self._make_trade_record(pos, price, "TP3", 0)
                             pnl = self.risk.close_position(sym, price, "TP3")
+                            _rec3.pnl_usdt = round(pnl, 4)
+                            self._trade_logger.log_trade(_rec3)
+                            self._trade_logger.update_session(
+                                self.risk.state.current_balance,
+                                self.risk.state.drawdown_pct)
                             self._wins += 1
                             self._log("ok",
-                                f"Closed {sym} TP3 pnl={pnl:+.4f} USDT")
+                                f"Closed {sym} TP3 pnl={pnl:+.4f} USDT 🎯")
                         else:
                             self._log("err",
                                 f"TP3 market order FAILED for {sym}")
@@ -729,6 +771,10 @@ class Orchestrator:
                 "active":  settings.is_trading_hour(),
             },
             "max_open_positions":   settings.max_open_positions,
+            "risk_per_trade_pct":  settings.risk_per_trade_pct,
+            "tp3_pct":             settings.tp3_pct,
+            "tp2_pct":             settings.tp2_pct,
+            "tp1_pct":             settings.tp1_pct,
             "max_open_positions":  settings.max_open_positions,
             "trade_stats":        self._trade_logger.get_stats(),
             "recent_trades":      self._trade_logger.get_recent(20),

@@ -40,7 +40,7 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "65"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "70"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
 
     # ── Gerçek trade verisi bulgularına dayanan filtreler ──────────────
@@ -72,6 +72,7 @@ class Settings:
                 ("tp2_pct",            "tp2_pct",            float),
                 ("tp3_pct",            "tp3_pct",            float),
                 ("symbol_blacklist",        "symbol_blacklist",        str),
+                ("risk_per_trade_pct",      "risk_per_trade_pct",      float),
                 ("trading_hours_enabled",   "trading_hours_enabled",   bool),
                 ("trading_hours_start",     "trading_hours_start",     int),
                 ("trading_hours_end",       "trading_hours_end",       int),
@@ -92,7 +93,7 @@ class Settings:
     max_drawdown_pct:       float = float(os.getenv("MAX_DRAWDOWN_PCT",      "8.0"))
     max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT","6.0"))
     correlation_threshold:  float = float(os.getenv("CORRELATION_THRESHOLD", "0.75"))
-    trail_mode:             str   = os.getenv("TRAIL_MODE", "none")   # none|breakeven|tp1|atr_trail — backtest: none best PnL
+    trail_mode:             str   = os.getenv("TRAIL_MODE", "none")   # none|breakeven|tp1|atr_trail (TP3 için atr_trail önerilir)
 
     # ── Agent weights ─────────────────────────────────────────
     weight_momentum:    float = float(os.getenv("WEIGHT_MOMENTUM",    "0.35"))
@@ -106,8 +107,8 @@ class Settings:
 
     # ── TP / SL ───────────────────────────────────────────────
     tp1_pct:           float = float(os.getenv("TP1_PCT",           "1.5"))   # Gerçek: SL ort %2.15, TP1=%1 → R:R=0.46. TP1=1.5% → R:R=0.70
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "2.5"))   # Gerçek: TP2 sonrası fiyat ort +0.1% — daha az gidiyor, geniş TP2 gereksiz
-    tp3_pct:           float = float(os.getenv("TP3_PCT",           "4.0"))   # TP3 hiç dolmadı — daha erişilebilir hedef
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "2.0"))   # V7: TP1=1.5% → TP2=2.0% → TP3=2.8% — gerçek veri bazlı zincir
+    tp3_pct:           float = float(os.getenv("TP3_PCT",           "4.0"))   # İstenen: %4.0 hedef, trailing ile yakalanır
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
     atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "3.0"))

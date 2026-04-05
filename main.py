@@ -216,6 +216,28 @@ async def set_max_positions(value: int):
             "max_positions": value}
 
 
+@app.post("/control/position_size")
+async def set_position_size(risk_pct: float = 1.5):
+    """Pozisyon büyüklüğünü ayarla (bakiyenin yüzdesi olarak risk). 0.5-5.0 arası."""
+    if orchestrator is None:
+        return {"error": "not ready"}
+    from core.storage import storage
+    risk_pct = max(0.5, min(5.0, float(risk_pct)))
+    settings.risk_per_trade_pct = risk_pct
+    storage.save_config("risk_per_trade_pct", risk_pct)
+    # Snapshot'ta notional hesabı için balance bilgisi
+    balance = orchestrator.risk.state.current_balance
+    example_notional = balance * risk_pct / 100 / 0.02 * settings.default_leverage
+    log.info("Position size set: %.1f%% risk (örnek notional ~$%.0f x%d kaldıraç)",
+             risk_pct, balance * risk_pct / 100, settings.default_leverage)
+    return {
+        "ok": True,
+        "msg": f"Risk/trade: {risk_pct:.1f}% (örnek notional ≈${example_notional:.0f})",
+        "risk_pct": risk_pct,
+        "example_notional_usdt": round(example_notional, 2),
+    }
+
+
 @app.post("/control/score")
 async def set_score_threshold(value: float):
     """Set minimum signal score threshold (50-90). No restart needed."""

@@ -362,6 +362,31 @@ body{padding:12px;overflow-y:auto}
 
     <div class="ctrl-divider"></div>
 
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
+      <div class="ctrl-lbl" style="display:flex;justify-content:space-between">
+        <span>Pozisyon Büyüklüğü (Risk %)</span>
+        <span style="color:var(--or2);font-size:8px" id="pos-size-notional">≈ — USDT</span>
+      </div>
+      <div class="lev-grid" style="grid-template-columns:repeat(5,1fr)">
+        <div class="lev-preset" onclick="setPosSize(0.5)">0.5%</div>
+        <div class="lev-preset" onclick="setPosSize(1.0)">1.0%</div>
+        <div class="lev-preset active" onclick="setPosSize(1.5)">1.5%</div>
+        <div class="lev-preset" onclick="setPosSize(2.0)">2.0%</div>
+        <div class="lev-preset" onclick="setPosSize(3.0)">3.0%</div>
+      </div>
+      <div class="ctrl-row">
+        <input type="number" class="lev-input" id="pos-size-val"
+          min="0.5" max="5.0" step="0.5" value="1.5" style="width:60px">
+        <span style="color:var(--g2);font-size:9px">% risk/trade</span>
+        <button class="apply-btn" onclick="applyPosSize()">Uygula</button>
+      </div>
+      <div style="font-size:7.5px;color:var(--g2);margin-top:2px">
+        Bakiyenin bu %'si kadar risk alınır. Notional = Risk / SL%
+      </div>
+    </div>
+
     <div class="ctrl-section">
       <div class="ctrl-lbl">Min sinyal skoru (eşik)</div>
       <div class="ctrl-row">
@@ -519,6 +544,8 @@ body{padding:12px;overflow-y:auto}
     <div class="rrow"><span class="rk">correlation filter</span><span class="rv ok">PASS</span></div>
     <div class="rrow"><span class="rk">open / max</span><span class="rv hot" id="rk-om">0 / —</span></div>
     <div class="rrow"><span class="rk">global leverage</span><span class="rv hot" id="rk-lev">x1</span></div>
+    <div class="rrow"><span class="rk">risk per trade</span><span class="rv" id="rk-risk">1.5%</span></div>
+    <div class="rrow"><span class="rk">tp1 / tp2 / tp3</span><span class="rv" id="rk-tp">1.5% / 2.0% / 4.0%</span></div>
     <div class="rrow"><span class="rk">wins / losses</span><span class="rv" id="rk-wl">—</span></div>
     <div class="rrow"><span class="rk">uptime</span><span class="rv" id="rk-up">—</span></div>
   </div>
@@ -638,6 +665,18 @@ function renderOrch(best){
 
 function applyState(d){
   // Auto-refresh trade stats if there are completed trades
+  // Risk/trade ve TP seviyeleri güncelle
+  if(d.risk_per_trade_pct){
+    const rkr = document.getElementById('rk-risk');
+    if(rkr) rkr.textContent = d.risk_per_trade_pct.toFixed(1)+'%';
+    const psv = document.getElementById('pos-size-val');
+    if(psv && document.activeElement !== psv) psv.value = d.risk_per_trade_pct;
+  }
+  if(d.tp1_pct && d.tp2_pct && d.tp3_pct){
+    const rktp = document.getElementById('rk-tp');
+    if(rktp) rktp.textContent =
+      d.tp1_pct.toFixed(1)+'% / '+d.tp2_pct.toFixed(1)+'% / '+d.tp3_pct.toFixed(1)+'%';
+  }
   if(d.trade_stats && d.trade_stats.total > 0){
     const stats=d.trade_stats;
     const count=$('trade-count');
@@ -789,6 +828,31 @@ function feedback(msg,ok){
   if(!el)return;
   el.textContent=msg;
   el.style.color=ok===false?'var(--red)':'var(--green)';
+}
+
+async function setPosSize(pct){
+  const el = document.getElementById('pos-size-val');
+  if(el) el.value = pct;
+  // Aktif presetı işaretle
+  document.querySelectorAll('#pos-size-val').forEach(()=>{});
+  await applyPosSize();
+}
+
+async function applyPosSize(){
+  const val = parseFloat(document.getElementById('pos-size-val')?.value || 1.5);
+  if(isNaN(val) || val < 0.5 || val > 5.0){
+    feedback('Geçersiz değer (0.5-5.0 arası)', false);
+    return;
+  }
+  try{
+    const r = await fetch('/control/position_size?risk_pct='+val, {method:'POST'});
+    const d = await r.json();
+    feedback(d.msg || 'OK', d.ok);
+    if(d.ok && d.example_notional_usdt){
+      const el = document.getElementById('pos-size-notional');
+      if(el) el.textContent = '≈ $'+d.example_notional_usdt.toFixed(0)+' notional';
+    }
+  }catch(e){feedback('Hata: '+e, false);}
 }
 
 async function setHours(enabled){
