@@ -46,7 +46,7 @@ SYMBOL_INFO: dict[str, tuple[float, float, int]] = {
 }
 
 # Max position notional as fraction of account balance per trade.
-MAX_NOTIONAL_PCT = 0.10
+MAX_NOTIONAL_PCT = 0.20   # Artırıldı: sabit notional yokken max notional %20
 
 
 def _round_step(value: float, step: float) -> float:
@@ -215,15 +215,25 @@ class RiskManager:
             stop_loss = entry_price + sl_distance
             tp1 = entry_price * (1 - settings.tp1_pct / 100)
 
-        # Risk budget in USDT
-        risk_usdt = self.state.current_balance * settings.risk_per_trade_pct / 100
+        # ── Notional hesabı (3 mod) ─────────────────────────────────────────
+        if getattr(settings, 'use_fixed_notional', False) and settings.fixed_notional_usdt > 0:
+            # MOD 1: Sabit USDT notional ($50, $100 vs)
+            target_notional = settings.fixed_notional_usdt
+            qty_risk = target_notional / entry_price
+        else:
+            # MOD 2: Risk % bazlı (varsayılan)
+            risk_usdt = self.state.current_balance * settings.risk_per_trade_pct / 100
+            qty_risk = risk_usdt / sl_distance
 
-        # Correct formula: qty = risk / sl_distance (no leverage factor)
-        qty_risk = risk_usdt / sl_distance
+        # Max notional sınırı (ayarlanabilir veya varsayılan %10)
+        if getattr(settings, 'max_notional_usdt', 0) > 0:
+            # Manuel max notional ($200, $500 vs)
+            max_notional = settings.max_notional_usdt
+        else:
+            # Varsayılan: bakiyenin %10'u
+            max_notional = self.state.current_balance * MAX_NOTIONAL_PCT
 
-        # Notional cap: don't put more than MAX_NOTIONAL_PCT of balance in one trade
-        max_notional = self.state.current_balance * MAX_NOTIONAL_PCT
-        qty_cap = max_notional / entry_price   # no leverage factor here either
+        qty_cap = max_notional / entry_price
 
         qty = _round_step(min(qty_risk, qty_cap), step_size)
         qty = max(qty, min_qty)

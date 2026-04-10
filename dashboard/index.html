@@ -365,25 +365,75 @@ body{padding:12px;overflow-y:auto}
     <div class="ctrl-divider"></div>
 
     <div class="ctrl-section">
-      <div class="ctrl-lbl" style="display:flex;justify-content:space-between">
-        <span>Pozisyon Büyüklüğü (Risk %)</span>
-        <span style="color:var(--or2);font-size:8px" id="pos-size-notional">≈ — USDT</span>
+      <div class="ctrl-lbl" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Pozisyon Büyüklüğü</span>
+        <span style="color:var(--or2);font-size:8px;font-weight:500" id="pos-mode-badge">MOD: SABİT$</span>
       </div>
-      <div class="lev-grid" style="grid-template-columns:repeat(5,1fr)">
-        <div class="lev-preset" onclick="setPosSize(0.5)">0.5%</div>
-        <div class="lev-preset" onclick="setPosSize(1.0)">1.0%</div>
-        <div class="lev-preset active" onclick="setPosSize(1.5)">1.5%</div>
-        <div class="lev-preset" onclick="setPosSize(2.0)">2.0%</div>
-        <div class="lev-preset" onclick="setPosSize(3.0)">3.0%</div>
+
+      <!-- Mod seçici -->
+      <div class="ctrl-row" style="gap:4px;margin-bottom:4px">
+        <button class="apply-btn" id="btn-mode-pct"
+          style="flex:1;border-color:var(--b2);color:var(--g1)"
+          onclick="setPosMode('pct')">Risk %</button>
+        <button class="apply-btn" id="btn-mode-usd"
+          style="flex:1;background:var(--or);color:#000;border-color:var(--or)"
+          onclick="setPosMode('usd')">Sabit $</button>
       </div>
-      <div class="ctrl-row">
-        <input type="number" class="lev-input" id="pos-size-val"
-          min="0.5" max="5.0" step="0.5" value="1.5" style="width:60px">
-        <span style="color:var(--g2);font-size:9px">% risk/trade</span>
-        <button class="apply-btn" onclick="applyPosSize()">Uygula</button>
+
+      <!-- Risk % modu -->
+      <div id="pos-pct-block" style="display:none">
+        <div class="lev-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:4px">
+          <div class="lev-preset" onclick="quickPct(0.5)">0.5%</div>
+          <div class="lev-preset" onclick="quickPct(1.0)">1.0%</div>
+          <div class="lev-preset active" id="pct-preset-15" onclick="quickPct(1.5)">1.5%</div>
+          <div class="lev-preset" onclick="quickPct(2.0)">2.0%</div>
+          <div class="lev-preset" onclick="quickPct(3.0)">3.0%</div>
+        </div>
+        <div class="ctrl-row">
+          <input type="number" class="lev-input" id="pos-pct-val"
+            min="0.5" max="5.0" step="0.1" value="1.5" style="width:55px">
+          <span style="color:var(--g2);font-size:9px">%</span>
+          <span style="color:var(--or2);font-size:8px;flex:1;text-align:right" id="pos-pct-notional">≈ — USDT</span>
+        </div>
       </div>
-      <div style="font-size:7.5px;color:var(--g2);margin-top:2px">
-        Bakiyenin bu %'si kadar risk alınır. Notional = Risk / SL%
+
+      <!-- Sabit USDT modu -->
+      <div id="pos-usd-block">
+        <div class="lev-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:4px">
+          <div class="lev-preset" onclick="quickUsd(25)">$25</div>
+          <div class="lev-preset" onclick="quickUsd(50)">$50</div>
+          <div class="lev-preset" onclick="quickUsd(100)">$100</div>
+          <div class="lev-preset" onclick="quickUsd(200)">$200</div>
+          <div class="lev-preset" onclick="quickUsd(500)">$500</div>
+        </div>
+        <div class="ctrl-row">
+          <span style="color:var(--g2);font-size:10px;font-weight:600">$</span>
+          <input type="number" class="lev-input" id="pos-usd-val"
+            min="5" max="10000" step="5" value="50" style="width:70px">
+          <span style="color:var(--g2);font-size:9px">USDT / trade</span>
+        </div>
+      </div>
+
+      <!-- Max Notional sınırı -->
+      <div style="margin-top:5px;padding-top:5px;border-top:0.5px solid var(--b2)">
+        <div style="font-size:8px;color:var(--g1);margin-bottom:3px;letter-spacing:0.5px">MAX NOTIONAL SINIRI</div>
+        <div class="ctrl-row">
+          <span style="color:var(--g2);font-size:10px;font-weight:600">$</span>
+          <input type="number" class="lev-input" id="pos-max-val"
+            min="0" max="50000" step="10" value="0" style="width:70px">
+          <span style="color:var(--g2);font-size:8px">USDT (0 = otomatik)</span>
+        </div>
+      </div>
+
+      <button class="apply-btn" onclick="applyPosSize()"
+        style="width:100%;margin-top:6px;padding:6px;font-size:10px;
+               background:var(--or);color:#000;border-color:var(--or)">
+        Uygula
+      </button>
+      <div style="font-size:7px;color:var(--g2);margin-top:3px;line-height:1.4">
+        Risk%: Bakiye × % / SL mesafesi = notional<br>
+        Sabit$: Her trade aynı USDT (SL'den bağımsız)<br>
+        Max$: Notional bu değeri geçemez
       </div>
     </div>
 
@@ -393,11 +443,11 @@ body{padding:12px;overflow-y:auto}
         <div class="lev-grid" id="score-grid">
           <div class="lev-preset" onclick="setScorePreset(68)">68</div>
           <div class="lev-preset" onclick="setScorePreset(70)">70</div>
-          <div class="lev-preset" onclick="setScorePreset(72)">72</div>
-          <div class="lev-preset active" onclick="setScorePreset(75)">75</div>
+          <div class="lev-preset active" onclick="setScorePreset(72)">72</div>
+          <div class="lev-preset" onclick="setScorePreset(75)">75</div>
           <div class="lev-preset" onclick="setScorePreset(80)">80</div>
         </div>
-        <input type="number" class="lev-input" id="score-val" min="60" max="85" value="75">
+        <input type="number" class="lev-input" id="score-val" min="60" max="85" value="72">
         <button class="apply-btn" onclick="applyScore()">Uygula</button>
       </div>
     </div>
@@ -430,7 +480,7 @@ body{padding:12px;overflow-y:auto}
     <div class="ctrl-section">
       <div class="ctrl-lbl">Trailing Stop</div>
       <div class="lev-grid" style="grid-template-columns:repeat(4,1fr)">
-        <div class="lev-preset" onclick="setTrail('none')">Yok</div>
+        <div class="lev-preset active" onclick="setTrail('none')">Yok</div>
         <div class="lev-preset" onclick="setTrail('breakeven')">BE</div>
         <div class="lev-preset" onclick="setTrail('tp1')">TP1</div>
         <div class="lev-preset" onclick="setTrail('atr_trail')">ATR</div>
@@ -551,6 +601,23 @@ body{padding:12px;overflow-y:auto}
   </div>
 </div>
 
+<!-- PERFORMANS ÖNERİLERİ PANELİ -->
+<div class="card" id="perf-panel" style="grid-column:1/-1">
+  <div class="chdr" style="display:flex;justify-content:space-between;align-items:center">
+    <div class="ctitle">performans önerileri</div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span style="font-size:8px;color:var(--g2)" id="perf-updated">—</span>
+      <button class="trade-btn" onclick="loadPerfTips()"
+        style="padding:3px 12px;font-size:9px">Analiz Et</button>
+    </div>
+  </div>
+  <div id="perf-tips-container" style="padding:8px 10px">
+    <div style="color:var(--g2);font-size:9px;text-align:center;padding:10px 0">
+      "Analiz Et" butonuna bas — trade log verilerine göre öneriler oluşturulsun.
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -665,6 +732,24 @@ function renderOrch(best){
 
 function applyState(d){
   // Auto-refresh trade stats if there are completed trades
+  // Trail mode badge güncelle
+  if(d.trail_mode !== undefined){
+    const labels = {'none':'Yok','breakeven':'BE','tp1':'TP1','atr_trail':'ATR'};
+    document.querySelectorAll('#ctrl-trail-grid .lev-preset, .lev-preset[onclick*="setTrail"]').forEach(btn=>{
+      const m = btn.getAttribute('onclick')?.match(/setTrail\('(\w+)'\)/);
+      if(m) btn.classList.toggle('active', m[1]===d.trail_mode);
+    });
+  }
+  // Pozisyon büyüklüğü durumunu güncelle
+  if(d.risk_per_trade_pct && _posMode==='pct'){
+    const pv=document.getElementById('pos-pct-val');
+    if(pv&&document.activeElement!==pv) pv.value=d.risk_per_trade_pct;
+    _updatePctNotional(d.risk_per_trade_pct);
+  }
+  if(d.max_notional_usdt!==undefined){
+    const mv=document.getElementById('pos-max-val');
+    if(mv&&document.activeElement!==mv&&d.max_notional_usdt>0) mv.value=d.max_notional_usdt;
+  }
   // Risk/trade ve TP seviyeleri güncelle
   if(d.risk_per_trade_pct){
     const rkr = document.getElementById('rk-risk');
@@ -828,6 +913,91 @@ function feedback(msg,ok){
   if(!el)return;
   el.textContent=msg;
   el.style.color=ok===false?'var(--red)':'var(--green)';
+}
+
+// ── Pozisyon Büyüklüğü Kontrolleri ──────────────────────────────────────
+let _posMode = 'usd'; // 'pct' veya 'usd' — varsayılan: sabit $
+
+function setPosMode(mode){
+  _posMode = mode;
+  const pctBlock = document.getElementById('pos-pct-block');
+  const usdBlock = document.getElementById('pos-usd-block');
+  const btnPct   = document.getElementById('btn-mode-pct');
+  const btnUsd   = document.getElementById('btn-mode-usd');
+  const badge    = document.getElementById('pos-mode-badge');
+  if(mode === 'pct'){
+    if(pctBlock) pctBlock.style.display = '';
+    if(usdBlock) usdBlock.style.display = 'none';
+    if(btnPct){ btnPct.style.background='var(--or)'; btnPct.style.color='#000'; btnPct.style.borderColor='var(--or)'; }
+    if(btnUsd){ btnUsd.style.background=''; btnUsd.style.color='var(--g1)'; btnUsd.style.borderColor='var(--b2)'; }
+    if(badge) badge.textContent = 'MOD: RISK%';
+  } else {
+    if(pctBlock) pctBlock.style.display = 'none';
+    if(usdBlock) usdBlock.style.display = '';
+    if(btnUsd){ btnUsd.style.background='var(--or)'; btnUsd.style.color='#000'; btnUsd.style.borderColor='var(--or)'; }
+    if(btnPct){ btnPct.style.background=''; btnPct.style.color='var(--g1)'; btnPct.style.borderColor='var(--b2)'; }
+    if(badge) badge.textContent = 'MOD: SABİT$';
+  }
+}
+
+function quickPct(v){
+  const el = document.getElementById('pos-pct-val');
+  if(el) el.value = v;
+  document.querySelectorAll('#pos-pct-block .lev-preset').forEach(b=>b.classList.remove('active'));
+  // Notional tahmini güncelle
+  _updatePctNotional(v);
+}
+
+function quickUsd(v){
+  const el = document.getElementById('pos-usd-val');
+  if(el) el.value = v;
+  document.querySelectorAll('#pos-usd-block .lev-preset').forEach(b=>b.classList.remove('active'));
+}
+
+function _updatePctNotional(pct){
+  const bal = parseFloat(document.getElementById('m-balance')?.textContent?.replace(/[$,]/g,'') || 0);
+  if(!bal || !pct) return;
+  // Yaklaşık: risk = bal × pct/100, notional = risk / SL(~2%)
+  const approxNotional = (bal * pct / 100) / 0.02;
+  const el = document.getElementById('pos-pct-notional');
+  if(el) el.textContent = '≈ $'+approxNotional.toFixed(0)+' notional';
+}
+
+async function applyPosSize(){
+  const maxVal = parseFloat(document.getElementById('pos-max-val')?.value || 0);
+  let url = '/control/position_size?';
+  let desc = '';
+
+  if(_posMode === 'pct'){
+    const pct = parseFloat(document.getElementById('pos-pct-val')?.value || 1.5);
+    if(isNaN(pct)||pct<0.5||pct>5.0){ feedback('Geçersiz % (0.5-5.0)',false); return; }
+    url += 'risk_pct='+pct;
+    desc = 'Risk '+pct+'%';
+  } else {
+    const usd = parseFloat(document.getElementById('pos-usd-val')?.value || 50);
+    if(isNaN(usd)||usd<5||usd>10000){ feedback('Geçersiz $ (5-10000)',false); return; }
+    url += 'fixed_usdt='+usd;
+    desc = 'Sabit $'+usd;
+  }
+  if(maxVal > 0) url += '&max_notional_usdt='+maxVal;
+
+  try{
+    const r = await fetch(url, {method:'POST'});
+    const d = await r.json();
+    feedback(d.msg||'OK', d.ok);
+    if(d.ok){
+      if(d.max_notional){
+        const el=document.getElementById('pos-max-val');
+        if(el) el.value=d.max_notional;
+      }
+      const nb=document.getElementById('pos-pct-notional');
+      if(nb&&d.balance&&_posMode==='pct'){
+        const pct=parseFloat(document.getElementById('pos-pct-val')?.value||1.5);
+        const n=(d.balance*pct/100)/0.02;
+        nb.textContent='≈ $'+n.toFixed(0)+' notional';
+      }
+    }
+  }catch(e){feedback('Hata: '+e,false);}
 }
 
 async function setPosSize(pct){
@@ -1075,6 +1245,163 @@ function connectSSE(){
   };
 }
 connectSSE();
+
+// ── Performans Önerileri Analizi ─────────────────────────────────────────
+async function loadPerfTips(){
+  const container = document.getElementById('perf-tips-container');
+  const updated   = document.getElementById('perf-updated');
+  if(!container) return;
+  container.innerHTML = '<div style="color:var(--g2);font-size:9px;text-align:center;padding:12px">Analiz ediliyor...</div>';
+
+  try{
+    const [stateRes, statsRes] = await Promise.all([
+      fetch('/state').then(r=>r.json()),
+      fetch('/trades/stats').then(r=>r.json()),
+    ]);
+
+    const tips = generateTips(stateRes, statsRes);
+    container.innerHTML = renderTips(tips);
+    if(updated) updated.textContent = new Date().toLocaleTimeString('tr-TR');
+  }catch(e){
+    container.innerHTML = '<div style="color:var(--red);font-size:9px;padding:8px">Hata: '+e+'</div>';
+  }
+}
+
+function generateTips(state, stats){
+  const tips = [];
+  const total   = stats.total || 0;
+  const wins    = stats.wins  || 0;
+  const losses  = stats.losses|| 0;
+  const net     = stats.net_pnl || 0;
+  const pf      = stats.profit_factor || 0;
+  const wr      = total>0 ? wins/total : 0;
+  const avgWin  = stats.avg_win   || 0;
+  const avgLoss = stats.avg_loss  || 0;
+  const rr      = avgLoss!==0 ? Math.abs(avgWin/avgLoss) : 0;
+
+  const trail   = state.trail_mode || 'none';
+  const score   = state.score_threshold || 70;
+  const tp1     = state.tp1_pct || 1.5;
+  const tp2     = state.tp2_pct || 2.0;
+  const bal     = state.balance || 0;
+  const riskPct = state.risk_per_trade_pct || 1.5;
+
+  // ── Kural 1: Trail stop ─────────────────────────────────────────
+  if(trail !== 'none'){
+    tips.push({
+      sev:'critical', icon:'🔴', title:'Trail Stop Aktif — TP2 Görülmüyor',
+      desc:`Trail mode "${trail}" ile TP1 sonrası SL breakeven'a taşınıyor. `+
+           `Gerçek veri: 17/29 trade TP2'ye ort. 0.08% kalmışken kapandı. `+
+           `TP2 kâr: ort. +$7 yerine +$3.5 breakeven kâr.`,
+      fix:'Trailing Stop → "Yok" seç',
+      impact: '+$39 / 29 trade (tahmini)'
+    });
+  }
+
+  // ── Kural 2: R:R oranı ──────────────────────────────────────────
+  if(rr > 0 && rr < 0.71){
+    tips.push({
+      sev:'critical', icon:'🔴', title:`R:R = ${rr.toFixed(2)} — Break-even Altı`,
+      desc:`Break-even için R:R > 0.71 gerekiyor (WR=${(wr*100).toFixed(1)}%). `+
+           `Mevcut: ort. kazanç +$${avgWin.toFixed(1)}, ort. kayıp -$${Math.abs(avgLoss).toFixed(1)}. `+
+           `TP2 dolunca R:R 0.75+ olur.`,
+      fix:'Trail="Yok" + TP2'e ulaşılmasını bekle',
+      impact:'Net PnL pozitife döner'
+    });
+  }
+
+  // ── Kural 3: Score eşiği ────────────────────────────────────────
+  if(score < 70 && total > 10){
+    tips.push({
+      sev:'warning', icon:'🟡', title:`Score Eşiği ${score} — Düşük Kalite`,
+      desc:`Score<70 tradelerde WR=%24, net=-$495 (200 trade geçmişi). `+
+           `Score≥70 ile WR=%70+.`,
+      fix:'Score eşiğini 70'e çıkar',
+      impact:'+$150 / 100 trade'
+    });
+  }
+
+  // ── Kural 4: Küçük notional ─────────────────────────────────────
+  const fixedN = state.fixed_notional || 0;
+  const approxN = fixedN > 0 ? fixedN : (bal * riskPct/100) / 0.02;
+  if(approxN < 50 && bal > 1000){
+    tips.push({
+      sev:'warning', icon:'🟡', title:`Notional ~$${approxN.toFixed(0)} — Çok Küçük`,
+      desc:`TP2 kâr = notional × 2% × 0.375 = $${(approxN*0.02*0.375).toFixed(2)}. `+
+           `Bu rakam komisyon ve slippage'ı zor karşılar. `+
+           `Hedef: notional ≥ $${(bal*0.01).toFixed(0)} (bakiyenin %1).`,
+      fix:'Sabit $ moduna geç → $100-200 gir, ya da Max Notional artır',
+      impact:`Kâr ${(approxN*0.02*0.375).toFixed(2)}→${(100*0.02*0.375).toFixed(2)} (2×)`
+    });
+  }
+
+  // ── Kural 5: TP1-TP2 mesafesi ──────────────────────────────────
+  if(tp2-tp1 < 0.4){
+    tips.push({
+      sev:'warning', icon:'🟡', title:`TP1-TP2 Arası ${((tp2-tp1)).toFixed(2)}% — Çok Dar`,
+      desc:`TP1=%${tp1} → TP2=%${tp2}: sadece %${(tp2-tp1).toFixed(2)} fark. `+
+           `Breakeven SL bu aralıkta tetikleniyor. `+
+           `Önerilen: TP2 = TP1 + 0.7% minimum.`,
+      fix:`TP2'yi ${(tp1+0.7).toFixed(1)}%'e çıkar (Railway Var. veya config)`,
+      impact:'TP2 hit oranı artar'
+    });
+  }
+
+  // ── Kural 6: WR iyiyse de kâr yoksa ────────────────────────────
+  if(wr > 0.55 && net < 0 && total > 20){
+    tips.push({
+      sev:'info', icon:'🔵', title:`WR=%${(wr*100).toFixed(1)} İyi Ama Net Zarar`,
+      desc:`Yüksek win rate olmasına rağmen net zarar var. `+
+           `Bu tipik R:R problemi: kazançlar küçük, kayıplar büyük. `+
+           `R:R=${rr.toFixed(2)} ile ${(wr*100).toFixed(1)}% WR yeterli değil.`,
+      fix:'Trail stop kaldır (R:R artır) veya notional büyüt',
+      impact:'Net PnL yönü değişir'
+    });
+  }
+
+  // ── Kural 7: Pf < 1 ─────────────────────────────────────────────
+  if(pf > 0 && pf < 0.8 && total > 20){
+    tips.push({
+      sev:'info', icon:'🔵', title:`Profit Factor = ${pf.toFixed(2)} — Geliştirilmeli`,
+      desc:`PF < 1 = her $1 kazanç için $${(1/pf).toFixed(2)} kayıp. `+
+           `PF > 1.5 hedef. V7 döneminde PF=0.84 olmuştu (trail kapalıyken).`,
+      fix:'Trail="Yok" yapılınca PF artacak (TP2 dolunca)',
+      impact:`PF ${pf.toFixed(2)} → 1.5+ (hedef)`
+    });
+  }
+
+  // ── İyi durum ───────────────────────────────────────────────────
+  if(tips.length === 0){
+    tips.push({
+      sev:'ok', icon:'✅', title:'Sistem İyi Durumda',
+      desc:`WR=%${(wr*100).toFixed(1)}, PF=${pf.toFixed(2)}, net=${net.toFixed(2)}$. Devam et.`,
+      fix:'—', impact:'—'
+    });
+  }
+  return tips;
+}
+
+function renderTips(tips){
+  const sevColors = {critical:'#f87171',warning:'#fbbf24',info:'#60a5fa',ok:'#4ade80'};
+  const sevBg     = {critical:'#1a0505',warning:'#151000',info:'#051020',ok:'#0a1a0a'};
+  return tips.map(t=>{
+    const c=sevColors[t.sev]||'#888'; const bg=sevBg[t.sev]||'#111';
+    return `<div style="display:flex;gap:10px;padding:8px 10px;margin-bottom:6px;
+               border-radius:4px;border:0.5px solid ${c}33;background:${bg}">
+      <div style="font-size:16px;flex-shrink:0;line-height:1.2">${t.icon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:9.5px;font-weight:700;color:${c};margin-bottom:3px">${t.title}</div>
+        <div style="font-size:8px;color:#888780;line-height:1.5;margin-bottom:4px">${t.desc}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <span style="font-size:8px"><span style="color:#f5a066;font-weight:600">→ Çözüm:</span>
+            <span style="color:#f0ede8"> ${t.fix}</span></span>
+          <span style="font-size:8px"><span style="color:#4ade80;font-weight:600">↑ Etki:</span>
+            <span style="color:#888780"> ${t.impact}</span></span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
 </script>
 </body>
 </html>

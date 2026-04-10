@@ -217,7 +217,61 @@ async def set_max_positions(value: int):
 
 
 @app.post("/control/position_size")
-async def set_position_size(risk_pct: float = 1.5):
+async def set_position_size(
+    risk_pct: float = None,
+    fixed_usdt: float = None,
+    max_notional_usdt: float = None,
+):
+    """
+    Pozisyon büyüklüğünü ayarla. 3 mod:
+      ?risk_pct=1.5          → bakiyenin %1.5'i kadar risk
+      ?fixed_usdt=50         → her trade tam $50 notional
+      ?max_notional_usdt=200 → maksimum notional sınırı $200
+    """
+    if orchestrator is None:
+        return {"error": "not ready"}
+    from core.storage import storage
+    balance = orchestrator.risk.state.current_balance
+    msgs = []
+
+    if fixed_usdt is not None:
+        fixed_usdt = max(5.0, min(10000.0, float(fixed_usdt)))
+        settings.fixed_notional_usdt = fixed_usdt
+        settings.use_fixed_notional  = True
+        storage.save_config("fixed_notional_usdt", fixed_usdt)
+        storage.save_config("use_fixed_notional",  True)
+        msgs.append(f"Sabit notional: ${fixed_usdt:.0f}/trade")
+        log.info("Fixed notional set: $%.0f", fixed_usdt)
+
+    if risk_pct is not None:
+        risk_pct = max(0.5, min(5.0, float(risk_pct)))
+        settings.risk_per_trade_pct  = risk_pct
+        settings.use_fixed_notional  = False
+        storage.save_config("risk_per_trade_pct", risk_pct)
+        storage.save_config("use_fixed_notional", False)
+        example = balance * risk_pct / 100 / 0.02 * settings.default_leverage
+        msgs.append(f"Risk/trade: {risk_pct:.1f}% (örnek notional ≈${example:.0f})")
+        log.info("Risk pct set: %.1f%%", risk_pct)
+
+    if max_notional_usdt is not None:
+        max_notional_usdt = max(10.0, min(50000.0, float(max_notional_usdt)))
+        settings.max_notional_usdt = max_notional_usdt
+        storage.save_config("max_notional_usdt", max_notional_usdt)
+        msgs.append(f"Max notional: ${max_notional_usdt:.0f}")
+        log.info("Max notional set: $%.0f", max_notional_usdt)
+
+    if not msgs:
+        return {"error": "En az bir parametre gerekli: risk_pct, fixed_usdt veya max_notional_usdt"}
+
+    return {
+        "ok": True,
+        "msg": " | ".join(msgs),
+        "risk_pct":        settings.risk_per_trade_pct,
+        "fixed_notional":  getattr(settings, 'fixed_notional_usdt', None),
+        "use_fixed":       getattr(settings, 'use_fixed_notional', False),
+        "max_notional":    getattr(settings, 'max_notional_usdt', None),
+        "balance":         round(balance, 2),
+    }
     """Pozisyon büyüklüğünü ayarla (bakiyenin yüzdesi olarak risk). 0.5-5.0 arası."""
     if orchestrator is None:
         return {"error": "not ready"}

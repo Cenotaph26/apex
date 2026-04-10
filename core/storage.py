@@ -64,6 +64,8 @@ class Storage:
         gp = sum(float(t["pnl_usdt"]) for t in wins)
         gl = abs(sum(float(t["pnl_usdt"]) for t in losses))
         total = len(trades)
+        win_pnls  = [float(t["pnl_usdt"]) for t in wins]
+        loss_pnls = [float(t["pnl_usdt"]) for t in losses]
         return {
             "total":         total,
             "wins":          len(wins),
@@ -73,6 +75,10 @@ class Storage:
             "gross_loss":    round(gl, 2),
             "net_pnl":       round(gp - gl, 2),
             "profit_factor": round(gp/gl, 2) if gl > 0 else 0,
+            "avg_win":       round(sum(win_pnls)/len(win_pnls), 2) if win_pnls else 0,
+            "avg_loss":      round(sum(loss_pnls)/len(loss_pnls), 2) if loss_pnls else 0,
+            "rr":            round(abs((sum(win_pnls)/len(win_pnls))/(sum(loss_pnls)/len(loss_pnls))), 2)
+                             if win_pnls and loss_pnls else 0,
         }
 
     def get_csv_bytes(self) -> bytes | None:

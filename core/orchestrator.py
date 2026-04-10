@@ -55,8 +55,9 @@ MAX_LOG_LINES  = 60
 MAX_EQUITY_PTS = 120
 
 # What fraction of the original position to close at each TP level
-TP1_CLOSE_PCT = 0.25   # close 25% at TP1 (backtest: higher PF with 25%)
-TP2_CLOSE_PCT = 0.50   # close 50% of remaining (= 25% of original) at TP2
+TP1_CLOSE_PCT = 0.50   # TP1'de %50 kapat → kalan %50 TP2'ye
+TP2_CLOSE_PCT = 0.25   # TP2'de kalanın %25'ini kapat → kalan %37.5 TP3'e
+# Net dağılım: TP1=%50 | TP2=%12.5 | TP3=%37.5 (orijinalin)
 # TP3 closes everything left
 
 # 15m bar duration in ms

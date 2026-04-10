@@ -40,7 +40,7 @@ class Settings:
     ])
 
     # ── Orchestrator (runtime-mutable) ────────────────────────
-    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "70"))
+    score_threshold:    float = float(os.getenv("SCORE_THRESHOLD",    "72"))
     default_leverage:   int   = int(os.getenv("DEFAULT_LEVERAGE",     "1"))
 
     # ── Gerçek trade verisi bulgularına dayanan filtreler ──────────────
@@ -73,6 +73,9 @@ class Settings:
                 ("tp3_pct",            "tp3_pct",            float),
                 ("symbol_blacklist",        "symbol_blacklist",        str),
                 ("risk_per_trade_pct",      "risk_per_trade_pct",      float),
+                ("use_fixed_notional",      "use_fixed_notional",      bool),
+                ("fixed_notional_usdt",     "fixed_notional_usdt",     float),
+                ("max_notional_usdt",       "max_notional_usdt",       float),
                 ("trading_hours_enabled",   "trading_hours_enabled",   bool),
                 ("trading_hours_start",     "trading_hours_start",     int),
                 ("trading_hours_end",       "trading_hours_end",       int),
@@ -90,6 +93,11 @@ class Settings:
 
     # ── Risk ──────────────────────────────────────────────────
     risk_per_trade_pct:     float = float(os.getenv("RISK_PER_TRADE_PCT",    "1.5"))
+    # Sabit notional modu — risk_pct yerine her trade sabit USDT kullanılır
+    use_fixed_notional:     bool  = os.getenv("USE_FIXED_NOTIONAL", "true").lower() == "true"
+    fixed_notional_usdt:    float = float(os.getenv("FIXED_NOTIONAL_USDT", "100"))
+    # Max notional sınırı (0 = devre dışı, risk.py'deki MAX_NOTIONAL_PCT geçerli)
+    max_notional_usdt:      float = float(os.getenv("MAX_NOTIONAL_USDT", "0"))
     max_drawdown_pct:       float = float(os.getenv("MAX_DRAWDOWN_PCT",      "8.0"))
     max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT","6.0"))
     correlation_threshold:  float = float(os.getenv("CORRELATION_THRESHOLD", "0.75"))
@@ -107,11 +115,11 @@ class Settings:
 
     # ── TP / SL ───────────────────────────────────────────────
     tp1_pct:           float = float(os.getenv("TP1_PCT",           "1.5"))   # Gerçek: SL ort %2.15, TP1=%1 → R:R=0.46. TP1=1.5% → R:R=0.70
-    tp2_pct:           float = float(os.getenv("TP2_PCT",           "2.0"))   # V7: TP1=1.5% → TP2=2.0% → TP3=2.8% — gerçek veri bazlı zincir
+    tp2_pct:           float = float(os.getenv("TP2_PCT",           "1.8"))   # Öneri: TP1=1.5%→TP2=1.8% (0.3% gap, daha erişilebilir)
     tp3_pct:           float = float(os.getenv("TP3_PCT",           "4.0"))   # İstenen: %4.0 hedef, trailing ile yakalanır
     # Increased from 1.5 → 2.0: gives SL more room so normal volatility
     # doesn't trigger it before the trade has a chance to develop.
-    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "3.0"))
+    atr_sl_multiplier: float = float(os.getenv("ATR_SL_MULTIPLIER", "2.0"))   # Dar SL → büyük notional → daha fazla kâr (aynı risk)
 
     # ── Watchlist ön filtresi ────────────────────────────────
     # Binance'tan çekilen tüm coinlere uygulanır.
