@@ -20,6 +20,7 @@ accurate PnL and ensures every partial close actually hits the exchange.
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -48,8 +49,19 @@ from agents.funding import FundingAgent
 from agents.liquidation import LiquidationHunter
 from core.coin_filter import CoinFilter
 from core.trade_logger import TradeLogger, TradeRecord
+from core.htf_filter import htf_trend_ok
+from core.daily_report import DailyReporter
 
 log = logging.getLogger("apex.orchestrator")
+
+
+def _get_htf_enabled() -> bool:
+    """Read live HTF flag (can be toggled at runtime via /control/htf_filter)."""
+    try:
+        import core.htf_filter as _htf
+        return _htf.HTF_ENABLED
+    except Exception:
+        return True
 
 MAX_LOG_LINES  = 60
 MAX_EQUITY_PTS = 120
@@ -106,6 +118,9 @@ class Orchestrator:
         self._losses = 0
         self._start_time = time.time()
 
+        # SL retry tracker — ghost position koruması
+        self._sl_retry_count: dict[str, int] = {}
+
         self.feed.on_candle_close(self._on_candle_close)
 
     # ── Logging ───────────────────────────────────────────────
@@ -131,6 +146,10 @@ class Orchestrator:
         # so watchlist is guaranteed to be populated before funding cache is warmed.
         # Do NOT call it here — settings.watchlist may still be ["AUTO"] at this point.
 
+        # Daily reporter başlat
+        from core.storage import storage as _storage
+        self._daily_reporter = DailyReporter(_storage)
+
         await asyncio.gather(
             asyncio.create_task(self.feed.run()),
             asyncio.create_task(self._eval_loop()),
@@ -138,6 +157,7 @@ class Orchestrator:
             asyncio.create_task(self._sync_positions_loop()),
             asyncio.create_task(self._equity_loop()),
             asyncio.create_task(self._balance_loop()),
+            asyncio.create_task(self._daily_reporter.run_loop(self._log)),
         )
 
     def stop(self):
@@ -366,6 +386,13 @@ class Orchestrator:
                 self._log("info", f"trade blocked [{sig.symbol}]: {reason}")
                 return
 
+            # ── HTF Trend Filtresi ──────────────────────────────────────────
+            htf_ok, htf_reason = await htf_trend_ok(sig.symbol, sig.direction)
+            if not htf_ok:
+                self._log("info",
+                    f"[{sig.symbol}] HTF filtre: {htf_reason} — trade atlandı")
+                return
+
             self._opening.add(sig.symbol)
 
         try:
@@ -521,10 +548,29 @@ class Orchestrator:
                             self._losses += 1
                             self._log("warn",
                                 f"Closed {sym} SL pnl={pnl:+.4f} USDT")
+                            # Başarılı — retry sayacını sıfırla
+                            self._sl_retry_count.pop(sym, None)
                         else:
+                            # ── SL Retry Mekanizması ─────────────────────────
+                            retries = self._sl_retry_count.get(sym, 0) + 1
+                            self._sl_retry_count[sym] = retries
                             self._log("err",
-                                f"SL market order FAILED for {sym} — retrying next tick")
-                            # Don't close position state — will retry next second
+                                f"SL order FAILED {sym} (deneme #{retries}) — "
+                                f"bir sonraki tick'te tekrar deneniyor")
+
+                            # 3 başarısız denemeden sonra pozisyonu zorla kapat
+                            if retries >= 3:
+                                self._log("err",
+                                    f"SL {retries}× başarısız {sym} — "
+                                    f"pozisyon durumu temizleniyor (ghost prevention)")
+                                pnl = self.risk.close_position(sym, price, "SL_FORCED")
+                                self._trade_logger.log_trade(
+                                    self._make_trade_record(pos, price, "SL_FORCED", 0))
+                                self._losses += 1
+                                self._sl_retry_count.pop(sym, None)
+                                self._log("err",
+                                    f"Zorla kapatıldı {sym} pnl≈{pnl:+.4f} USDT "
+                                    f"(exchange ile uyumsuzluk olabilir — manuel kontrol)")
                     finally:
                         self._closing.discard(sym)
 
@@ -779,6 +825,8 @@ class Orchestrator:
             "max_open_positions":  settings.max_open_positions,
             "trade_stats":        self._trade_logger.get_stats(),
             "recent_trades":      self._trade_logger.get_recent(20),
+            "htf_filter_enabled": _get_htf_enabled(),
+            "sl_retries":         dict(self._sl_retry_count),
             "logs": [{"ts": e.ts, "lvl": e.lvl, "msg": e.msg} for e in self._logs],
             "uptime": f"{h:02d}:{m:02d}:{s:02d}",
             "best_signal": {

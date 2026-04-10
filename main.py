@@ -306,9 +306,38 @@ async def set_score_threshold(value: float):
             "score_threshold": value}
 
 
+@app.get("/report/daily")
+async def daily_report_endpoint():
+    """Return today's trade stats formatted as a daily report dict."""
+    from core.storage import storage
+    from core.daily_report import _build_daily_stats
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    trades = storage.get_trades(2000)
+    stats  = _build_daily_stats(trades, today)
+    if not stats:
+        return {"date": today, "total": 0, "msg": "Bugün işlem yok"}
+    return stats
+
+
+@app.post("/control/htf_filter")
+async def set_htf_filter(enabled: bool):
+    """Enable or disable the HTF trend filter at runtime."""
+    import os
+    # Patch the module-level flag live
+    import core.htf_filter as _htf
+    _htf.HTF_ENABLED = enabled
+    msg = f"HTF filtre: {'açık' if enabled else 'kapalı'}"
+    log.info(msg)
+    from core.storage import storage
+    storage.save_config("htf_filter_enabled", int(enabled))
+    return {"ok": True, "msg": msg, "htf_filter_enabled": enabled}
+
+
 @app.get("/stream")
 async def stream(request: Request):
     async def event_generator():
+        tick = 0
         try:
             while True:
                 if await request.is_disconnected():
@@ -318,9 +347,14 @@ async def stream(request: Request):
                         data = json.dumps(orchestrator.snapshot())
                         yield f"data: {data}\n\n"
                     else:
-                        yield "data: {}\n\n"
+                        # Send status so dashboard knows we're starting (not stuck)
+                        yield 'data: {"status":"starting","balance":null}\n\n'
                 except Exception as e:
                     log.warning("SSE snapshot error: %s", e)
+                # Every 15 ticks (~15s) send a keepalive comment to prevent Railway proxy timeout
+                tick += 1
+                if tick % 15 == 0:
+                    yield ": keepalive\n\n"
                 await asyncio.sleep(1.0)
         except (asyncio.CancelledError, GeneratorExit):
             pass
@@ -332,6 +366,7 @@ async def stream(request: Request):
             "Cache-Control":               "no-cache",
             "X-Accel-Buffering":           "no",
             "Access-Control-Allow-Origin": "*",
+            "Connection":                  "keep-alive",
         },
     )
 

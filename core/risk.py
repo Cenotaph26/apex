@@ -23,6 +23,7 @@ Fixes vs v4:
 from __future__ import annotations
 import logging
 import math
+import os
 import statistics
 from dataclasses import dataclass, field
 
@@ -255,6 +256,10 @@ class RiskManager:
                  pos.symbol, pos.direction, pos.leverage,
                  pos.qty, pos.entry_price, pos.stop_loss, margin)
 
+    # Binance Futures taker fee: %0.04 her iki yönde (giriş + çıkış = %0.08 toplam)
+    # Env: TAKER_FEE_PCT=0.04 (her taraf), toplam = entry + exit = 2× fee
+    TAKER_FEE_PCT: float = float(os.getenv("TAKER_FEE_PCT", "0.04")) / 100
+
     def close_position(self, symbol: str, exit_price: float, reason: str = "") -> float:
         pos = self.state.positions.pop(symbol, None)
         if pos is None:
@@ -266,17 +271,25 @@ class RiskManager:
         else:
             pnl = (pos.entry_price - exit_price) * pos.qty
 
-        self.state.closed_pnl += pnl
+        # ── Komisyon kesintisi ──────────────────────────────────────────────
+        # Giriş + çıkış taker fee: 2 × taker_fee × notional
+        entry_notional = pos.entry_price * pos.qty
+        exit_notional  = exit_price      * pos.qty
+        commission     = (entry_notional + exit_notional) * self.TAKER_FEE_PCT
+        pnl_net        = pnl - commission
+        # ──────────────────────────────────────────────────────────────────
+
+        self.state.closed_pnl += pnl_net
         # Update wallet locally for immediate dashboard feedback.
         # _balance_loop overwrites with real walletBalance within 30s.
-        self.state.current_balance += pnl
+        self.state.current_balance += pnl_net
         # Update peak with realized equity
         if self.state.current_balance > self.state.peak_balance:
             self.state.peak_balance = self.state.current_balance
-        log.info("CLOSED %s [%s] exit=%.4f pnl=%+.4f USDT balance=%.2f",
-                 symbol, reason or "manual", exit_price, pnl,
+        log.info("CLOSED %s [%s] exit=%.4f pnl=%+.4f fee=%.4f net=%+.4f USDT balance=%.2f",
+                 symbol, reason or "manual", exit_price, pnl, commission, pnl_net,
                  self.state.current_balance)
-        return pnl
+        return pnl_net
 
     def update_pnl(self, symbol: str, current_price: float):
         """Update unrealized PnL and peak equity for drawdown calculation."""

@@ -242,6 +242,8 @@ body{padding:12px;overflow-y:auto}
   <span class="asep">|</span>
   <div class="api"><div class="adot warn"></div>Funding (testnet)</div>
   <span class="asep">|</span>
+  <div class="api"><div class="adot ok" id="dot-htf"></div><span id="htf-label">HTF Filter</span></div>
+  <span class="asep">|</span>
   <div class="aright" id="stream-status">connecting...</div>
 </div>
 
@@ -465,6 +467,24 @@ body{padding:12px;overflow-y:auto}
     <div class="ctrl-divider"></div>
 
     <div class="ctrl-section">
+      <div class="ctrl-lbl" style="display:flex;justify-content:space-between;align-items:center">
+        <span>HTF Trend Filtresi</span>
+        <span style="font-size:8px;color:var(--g2)">1h + 4h EMA20</span>
+      </div>
+      <div class="pause-row">
+        <button class="pause-btn" id="btn-htf-on" onclick="setHTFFilter(true)"
+          style="border-color:#1a5c30;color:var(--green)">✓ Aç</button>
+        <button class="pause-btn" id="btn-htf-off" onclick="setHTFFilter(false)"
+          style="border-color:#5c1a1a;color:var(--red)">✕ Kapat</button>
+      </div>
+      <div style="font-size:7.5px;color:var(--g2);margin-top:3px">
+        Kapalı trend karşı sinyalleri filtreler. Aktif olduğunda WR artar, işlem sayısı düşer.
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-section">
       <div class="ctrl-lbl">Pozisyon kapat</div>
       <div class="ctrl-row">
         <select class="sym-select" id="close-sym">
@@ -618,6 +638,33 @@ body{padding:12px;overflow-y:auto}
   </div>
 </div>
 
+
+<!-- SL RETRY UYARI PANELİ -->
+<div class="card s3" id="sl-retry-panel" style="display:none;border-color:#5c1a1a">
+  <div class="chdr" style="background:#1a0505">
+    <div class="ctitle" style="color:var(--red)">⚠ SL retry uyarısı</div>
+    <div class="badge bred" id="sl-retry-badge">—</div>
+  </div>
+  <div id="sl-retry-body" style="padding:8px 12px;font-size:10px;color:var(--red);line-height:1.8">—</div>
+</div>
+
+<!-- GÜNLÜK RAPOR PANELİ -->
+<div class="card s3" id="daily-report-panel" style="display:none">
+  <div class="chdr" style="display:flex;justify-content:space-between;align-items:center">
+    <div class="ctitle">günlük rapor</div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <span style="font-size:8px;color:var(--g2)" id="daily-report-date">—</span>
+      <button class="trade-btn" onclick="loadDailyReport()"
+        style="padding:3px 12px;font-size:9px">Yenile</button>
+    </div>
+  </div>
+  <div id="daily-report-body" style="padding:10px 12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+    <div style="color:var(--g2);font-size:9px;grid-column:1/-1;text-align:center;padding:8px 0">
+      Rapor yükleniyor...
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -731,7 +778,30 @@ function renderOrch(best){
 }
 
 function applyState(d){
-  // Auto-refresh trade stats if there are completed trades
+  // ── HTF Filter indicator ───────────────────────────────────
+  if(d.htf_filter_enabled !== undefined){
+    var dotHtf = $('dot-htf');
+    var lblHtf = $('htf-label');
+    if(dotHtf) dotHtf.className = 'adot ' + (d.htf_filter_enabled ? 'ok' : 'off');
+    if(lblHtf) lblHtf.textContent = 'HTF ' + (d.htf_filter_enabled ? 'ON' : 'OFF');
+  }
+
+  // ── SL Retry uyarısı ──────────────────────────────────────
+  if(d.sl_retries !== undefined){
+    var retries = d.sl_retries || {};
+    var panel = $('sl-retry-panel');
+    var badge = $('sl-retry-badge');
+    var body  = $('sl-retry-body');
+    var hasProblem = Object.keys(retries).length > 0;
+    if(panel) panel.style.display = hasProblem ? '' : 'none';
+    if(hasProblem && badge && body){
+      badge.textContent = Object.keys(retries).length + ' sembol';
+      body.innerHTML = Object.entries(retries).map(function(e){
+        return '<b style="color:var(--red)">'+e[0]+'</b>: '+e[1]+' başarısız deneme — lütfen exchange'i kontrol et';
+      }).join('<br>');
+    }
+  }
+
   // Trail mode badge güncelle
   if(d.trail_mode !== undefined){
     const labels = {'none':'Yok','breakeven':'BE','tp1':'TP1','atr_trail':'ATR'};
@@ -829,8 +899,11 @@ function applyState(d){
     var ro = document.getElementById('rk-om');
     if(ro){var cur=ro.textContent.split('/')[0].trim();ro.textContent=cur+' / '+d.max_open_positions;}
   }
-  if(!d||!d.balance)return;
-  if(!d||d.balance===undefined)return;
+  // Show "starting" status if bot not yet ready
+  if(!d||d.balance===null||d.balance===undefined){
+    set('stream-status', d && d.status==='starting' ? 'bot starting...' : 'waiting...');
+    return;
+  }
   set('uptime',d.uptime||'—');
   var now=new Date();
   set('hdr-ts',now.toISOString().replace('T',' — ').slice(0,22)+' UTC');
@@ -1202,6 +1275,63 @@ async function applyScore(){
   }catch(e){feedback('Hata: '+e,false);}
 }
 
+// ── Daily Report ─────────────────────────────────────────────────────────
+async function loadDailyReport(){
+  var panel = $('daily-report-panel');
+  var body  = $('daily-report-body');
+  var dateEl = $('daily-report-date');
+  if(!panel || !body) return;
+
+  panel.style.display = '';
+  body.innerHTML = '<div style="color:var(--g2);font-size:9px;grid-column:1/-1;text-align:center;padding:8px">Yükleniyor...</div>';
+
+  try{
+    var r = await fetch('/trades/stats');
+    var stats = await r.json();
+    var now = new Date();
+    var dateStr = now.toISOString().slice(0,10);
+    if(dateEl) dateEl.textContent = dateStr;
+
+    var net = (stats.gross_profit||0) - (stats.gross_loss||0);
+    var pf  = stats.profit_factor || 0;
+    var wr  = stats.wr_pct || 0;
+    var total = stats.total || 0;
+
+    if(total === 0){
+      body.innerHTML = '<div style="color:var(--g2);font-size:9px;grid-column:1/-1;text-align:center;padding:12px">Bugün için işlem yok</div>';
+      return;
+    }
+
+    var netCol = net >= 0 ? 'var(--green)' : 'var(--red)';
+    var netStr = (net >= 0 ? '+$' : '-$') + Math.abs(net).toFixed(2);
+    var pfCol  = pf >= 1.5 ? 'var(--green)' : pf >= 1.0 ? 'var(--yel)' : 'var(--red)';
+    var wrCol  = wr >= 55 ? 'var(--green)' : wr >= 45 ? 'var(--yel)' : 'var(--red)';
+
+    body.innerHTML =
+      _reportCard('📊 İşlem',    total,             'var(--or2)') +
+      _reportCard('🎯 Win Rate', wr.toFixed(1)+'%', wrCol) +
+      _reportCard('💰 Net PnL',  netStr,            netCol) +
+      _reportCard('📈 P.Factor', pf.toFixed(2),     pfCol) +
+      _reportCard('✅ Kazanç',   stats.wins||0,     'var(--green)') +
+      _reportCard('❌ Kayıp',    stats.losses||0,   'var(--red)') +
+      _reportCard('💹 Brüt Kâr', '+$'+(stats.gross_profit||0).toFixed(2), 'var(--green)') +
+      _reportCard('📉 Brüt Zarar','-$'+(stats.gross_loss||0).toFixed(2),  'var(--red)');
+
+  }catch(e){
+    body.innerHTML = '<div style="color:var(--red);font-size:9px;grid-column:1/-1;padding:8px">Hata: '+e+'</div>';
+  }
+}
+
+function _reportCard(label, value, color){
+  return '<div style="background:var(--bg3);border:0.5px solid var(--b);border-radius:5px;padding:8px 10px">'
+    +'<div style="font-size:8px;color:var(--g2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:3px">'+label+'</div>'
+    +'<div style="font-size:15px;font-weight:500;color:'+color+'">'+value+'</div>'
+    +'</div>';
+}
+
+// Auto-load report on page open
+setTimeout(loadDailyReport, 3000);
+
 async function pauseBot(){
   try{var r=await fetch('/control/pause',{method:'POST'});var d=await r.json();feedback(d.msg,'ok');}
   catch(e){feedback('Hata: '+e,false);}
@@ -1210,6 +1340,22 @@ async function pauseBot(){
 async function resumeBot(){
   try{var r=await fetch('/control/resume',{method:'POST'});var d=await r.json();feedback(d.msg,'ok');}
   catch(e){feedback('Hata: '+e,false);}
+}
+
+async function setHTFFilter(enabled){
+  try{
+    var r=await fetch('/control/htf_filter?enabled='+enabled,{method:'POST'});
+    var d=await r.json();
+    feedback(d.msg||'OK', d.ok);
+    // Update button styles
+    var on=$('btn-htf-on'); var off=$('btn-htf-off');
+    if(on)  on.classList.toggle('active', enabled);
+    if(off) off.classList.toggle('active', !enabled);
+    // Update apibar indicator
+    var dot=$('dot-htf'); var lbl=$('htf-label');
+    if(dot) dot.className='adot '+(enabled?'ok':'off');
+    if(lbl) lbl.textContent='HTF '+(enabled?'ON':'OFF');
+  }catch(e){feedback('Hata: '+e,false);}
 }
 
 // ── SSE ───────────────────────────────────────────────────
@@ -1224,7 +1370,7 @@ function connectSSE(){
     retryDelay=2000;
   };
   sse.onmessage=function(e){
-    try{var d=JSON.parse(e.data);if(d&&d.balance!==undefined)applyState(d);}catch(_){}
+    try{var d=JSON.parse(e.data);applyState(d);}catch(_){}
   };
   sse.onerror=function(){
     sse.close();
@@ -1232,7 +1378,7 @@ function connectSSE(){
     $('pulse').style.background='var(--red)';
     $('dot-ws').className='adot off';
     setTimeout(connectSSE,retryDelay);
-    retryDelay=Math.min(retryDelay*1.5,30000);
+    retryDelay=Math.min(retryDelay*1.5,10000);  // max 10s (not 30s)
   };
 }
 connectSSE();
