@@ -84,7 +84,7 @@ async def health():
 @app.get("/state")
 async def state():
     if orchestrator is None:
-        return {}
+        return {"status": "starting", "balance": None}
     return orchestrator.snapshot()
 
 

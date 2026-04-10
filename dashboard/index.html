@@ -1358,28 +1358,70 @@ async function setHTFFilter(enabled){
   }catch(e){feedback('Hata: '+e,false);}
 }
 
-// ── SSE ───────────────────────────────────────────────────
-var sse=null,retryDelay=2000;
+// ── Data Stream — SSE with polling fallback ───────────────
+// Railway HTTP/2 proxy can block SSE; polling kicks in automatically.
+var sse=null, _pollTimer=null, _sseOk=false, retryDelay=2000;
+
+function _setLive(){
+  $('stream-status').textContent='streams: live';
+  $('pulse').style.background='var(--or)';
+  $('dot-ws').className='adot ok';
+}
+function _setError(msg){
+  $('stream-status').textContent=msg||'reconnecting...';
+  $('pulse').style.background='var(--red)';
+  $('dot-ws').className='adot off';
+}
+
+// ── Polling fallback (always runs as backup) ──────────────
+var _lastPollOk = false;
+async function _poll(){
+  try{
+    var r = await fetch('/state', {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    var d = await r.json();
+    if(!_sseOk){   // only update UI from poll if SSE isn't working
+      _setLive();
+      applyState(d);
+    }
+    _lastPollOk = true;
+  }catch(e){
+    _lastPollOk = false;
+    if(!_sseOk) _setError('poll error — retrying...');
+  }
+}
+// Start polling immediately, every 2s
+_pollTimer = setInterval(_poll, 2000);
+_poll();  // first poll right away
+
+// ── SSE (preferred — lower latency) ──────────────────────
 function connectSSE(){
-  $('stream-status').textContent='connecting...';
-  sse=new EventSource('/stream');
-  sse.onopen=function(){
-    $('stream-status').textContent='streams: live';
-    $('pulse').style.background='var(--or)';
-    $('dot-ws').className='adot ok';
-    retryDelay=2000;
-  };
-  sse.onmessage=function(e){
-    try{var d=JSON.parse(e.data);applyState(d);}catch(_){}
-  };
-  sse.onerror=function(){
-    sse.close();
-    $('stream-status').textContent='reconnecting in '+(retryDelay/1000).toFixed(0)+'s...';
-    $('pulse').style.background='var(--red)';
-    $('dot-ws').className='adot off';
-    setTimeout(connectSSE,retryDelay);
-    retryDelay=Math.min(retryDelay*1.5,10000);  // max 10s (not 30s)
-  };
+  try{
+    sse = new EventSource('/stream');
+    sse.onopen = function(){
+      _sseOk = true;
+      _setLive();
+      retryDelay = 2000;
+    };
+    sse.onmessage = function(e){
+      try{
+        var d = JSON.parse(e.data);
+        _sseOk = true;
+        applyState(d);
+      }catch(_){}
+    };
+    sse.onerror = function(){
+      _sseOk = false;
+      sse.close();
+      // Polling already running — SSE will retry, polling covers the gap
+      _setError('SSE reconnecting...');
+      setTimeout(connectSSE, retryDelay);
+      retryDelay = Math.min(retryDelay * 1.5, 15000);
+    };
+  }catch(e){
+    // EventSource not supported or blocked — polling handles it
+    _sseOk = false;
+  }
 }
 connectSSE();
 
